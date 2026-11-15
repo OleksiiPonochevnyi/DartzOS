@@ -1,0 +1,686 @@
+# ===================================================
+#   DartzOS 1.0 "Guau" - se construye solo en GitHub
+# ===================================================
+name: Construir DartzOS
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  construir:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - name: Hacer sitio en el disco
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - name: Construir DartzOS
+        run: |
+          mkdir -p dartzos
+          cat > dartzos/construir.sh <<'DARTZOS_SCRIPT_FIN'
+          #!/bin/bash
+          # Construye DartzOS (se ejecuta dentro de un contenedor Debian 13)
+          set -euo pipefail
+          SALIDA=/dartzos/salida; B=/tmp/dartzos-build; mkdir -p "$SALIDA"
+          export DEBIAN_FRONTEND=noninteractive
+          echo '🐶 [1/5] Herramientas'
+          apt-get update
+          apt-get install -y live-build debootstrap xorriso squashfs-tools mtools dosfstools grub-efi-amd64-bin grub-pc-bin cpio rsync librsvg2-bin imagemagick fonts-dejavu-core
+          echo '🐶 [2/5] Configuracion'
+          rm -rf "$B" && mkdir -p "$B" && cd "$B"
+          lb config \
+            --distribution trixie \
+            --archive-areas "main contrib non-free non-free-firmware" \
+            --debian-installer none \
+            --binary-images iso-hybrid \
+            --memtest none \
+            --image-name dartzos \
+            --iso-application "DartzOS" \
+            --iso-volume "DartzOS" \
+            --iso-publisher "Alex" \
+            --bootappend-live "boot=live components quiet splash persistence username=dartz user-fullname=Dartz hostname=dartzos locales=es_ES.UTF-8 keyboard-layouts=es keyboard-variants=mac timezone=Europe/Madrid"
+
+          echo '🐶 [3/5] Archivos de DartzOS'
+          mkdir -p "$(dirname "config/hooks/normal/9000-dartzos.hook.chroot")"
+          cat > "config/hooks/normal/9000-dartzos.hook.chroot" <<'DZ_FIN'
+          #!/bin/sh
+          # Últimos retoques de DartzOS (se ejecuta dentro del sistema mientras se construye)
+          set -e
+
+          echo ">>> Poniendo nombre: DartzOS"
+          rm -f /etc/os-release
+          cat > /etc/os-release <<'EOF'
+          PRETTY_NAME="DartzOS 1.0 (Guau)"
+          NAME="DartzOS"
+          VERSION_ID="1.0"
+          VERSION="1.0 (Guau)"
+          VERSION_CODENAME=trixie
+          ID=debian
+          HOME_URL="https://www.debian.org/"
+          EOF
+          printf 'DartzOS 1.0 (Guau) \\n \\l\n\n' > /etc/issue
+          echo "DartzOS 1.0 (Guau)" > /etc/issue.net
+
+          echo ">>> Icono del perrito"
+          mkdir -p /usr/share/icons/hicolor/128x128/apps /usr/share/icons/hicolor/scalable/apps
+          cp /usr/share/dartzos/icono-128.png /usr/share/icons/hicolor/128x128/apps/dartzos.png || true
+          cp /usr/share/dartzos/logo.svg /usr/share/icons/hicolor/scalable/apps/dartzos.svg || true
+          gtk-update-icon-cache -f /usr/share/icons/hicolor 2>/dev/null || true
+
+          echo ">>> Fondo de pantalla"
+          mkdir -p /usr/share/backgrounds/dartzos
+          cp /usr/share/dartzos/fondo.png /usr/share/backgrounds/dartzos/fondo.png || true
+
+          echo ">>> Pantalla de arranque (plymouth)"
+          plymouth-set-default-theme dartzos || true
+          update-initramfs -u -k all
+
+          echo ">>> Panel del escritorio (sin preguntas la primera vez, con el perrito en el menú)"
+          XML=/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml
+          mkdir -p "$XML"
+          if [ -f /etc/xdg/xfce4/panel/default.xml ] && [ ! -f "$XML/xfce4-panel.xml" ]; then
+            cp /etc/xdg/xfce4/panel/default.xml "$XML/xfce4-panel.xml"
+            sed -i 's|value="applicationsmenu"/>|value="applicationsmenu"><property name="button-icon" type="string" value="dartzos"/><property name="button-title" type="string" value="DartzOS"/></property>|' "$XML/xfce4-panel.xml"
+          fi
+
+          echo ">>> Terminal: colores, comandos chulos y bienvenida"
+          cat >> /etc/skel/.bashrc <<'EOF'
+
+          # ----- DartzOS -----
+          [ -f /etc/dartzos/bashrc ] && . /etc/dartzos/bashrc
+          EOF
+
+          echo ">>> Ventiladores del MacBook"
+          systemctl enable mbpfan 2>/dev/null || true
+
+          echo ">>> Permisos y memoria automática del USB"
+          chmod +x /usr/local/bin/ayuda /usr/local/bin/dartz-fondo /usr/local/sbin/dartz-memoria-auto 2>/dev/null || true
+          systemctl enable dartz-memoria.service
+
+          echo ">>> DartzOS listo 🐶"
+          DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/etc/X11/xorg.conf.d/30-touchpad.conf")"
+          cat > "config/includes.chroot/etc/X11/xorg.conf.d/30-touchpad.conf" <<'DZ_FIN'
+          # Trackpad del MacBook: tocar para hacer clic y scroll como en macOS
+          Section "InputClass"
+              Identifier "DartzOS trackpad"
+              MatchIsTouchpad "on"
+              Driver "libinput"
+              Option "Tapping" "on"
+              Option "NaturalScrolling" "true"
+              Option "ClickMethod" "clickfinger"
+              Option "DisableWhileTyping" "on"
+          EndSection
+          DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/etc/dartzos/bashrc")"
+          cat > "config/includes.chroot/etc/dartzos/bashrc" <<'DZ_FIN'
+          # ===== Terminal de DartzOS =====
+
+          # Prompt: dartz@DartzOS:~$
+          PS1='\[\e[1;33m\]\u\[\e[0m\]@\[\e[1;34m\]DartzOS\[\e[0m\]:\[\e[1;36m\]\w\[\e[0m\]\$ '
+
+          # Comandos chulos
+          alias forrest='curl ascii.live/forrest'
+          alias loro='curl parrot.live'
+          alias tiempo='curl "wttr.in/?lang=es"'
+          alias matrix='cmatrix'
+          alias tren='sl'
+          alias tetris='bastet'
+          alias marcianos='ninvaders'
+          alias luna='moon-buggy'
+          alias guau='fortune -s | cowsay'
+          alias info='fastfetch'
+          alias ls='ls --color=auto'
+          alias ll='ls -la --color=auto'
+
+          # Bienvenida al abrir la terminal
+          if [ -z "$DARTZ_HOLA" ]; then
+            export DARTZ_HOLA=1
+            command -v fastfetch >/dev/null && fastfetch
+            echo "Escribe  ayuda  para ver los comandos chulos de DartzOS 🐶"
+          fi
+          DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/etc/modprobe.d/brcmfmac.conf")"
+          cat > "config/includes.chroot/etc/modprobe.d/brcmfmac.conf" <<'DZ_FIN'
+          # WiFi Broadcom BCM43602 del MacBook Pro 2015.
+          # Desactiva funciones que a veces impiden conectarse a redes WPA2.
+          options brcmfmac feature_disable=0x82000
+          DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/etc/systemd/system/dartz-memoria.service")"
+          cat > "config/includes.chroot/etc/systemd/system/dartz-memoria.service" <<'DZ_FIN'
+          [Unit]
+          Description=DartzOS: preparar la memoria del USB
+          After=local-fs.target systemd-udev-trigger.service
+          Before=display-manager.service
+          ConditionKernelCommandLine=persistence
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/dartz-memoria-auto
+          TimeoutSec=600
+
+          [Install]
+          WantedBy=multi-user.target
+          DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/etc/xdg/autostart/dartz-fondo.desktop")"
+          cat > "config/includes.chroot/etc/xdg/autostart/dartz-fondo.desktop" <<'DZ_FIN'
+          [Desktop Entry]
+          Type=Application
+          Name=Fondo de DartzOS
+          Exec=/usr/local/bin/dartz-fondo
+          OnlyShowIn=XFCE;
+          NoDisplay=true
+          DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/usr/local/bin/ayuda")"
+          cat > "config/includes.chroot/usr/local/bin/ayuda" <<'DZ_FIN'
+          #!/bin/bash
+          # Lista de comandos chulos de DartzOS
+          if command -v figlet >/dev/null && command -v lolcat >/dev/null; then
+            figlet -f standard DartzOS | lolcat
+          else
+            echo "=== DartzOS ==="
+          fi
+          cat <<'EOF'
+
+            🐶  COMANDOS CHULOS
+            ─────────────────────────────────────────────
+            forrest        Forrest Gump corriendo en ASCII (Ctrl+C para salir)
+            loro           Un loro bailando (parrot.live)
+            tiempo         El tiempo donde estás
+            matrix         Lluvia de letras como en Matrix
+            tren           Pasa un tren por la terminal
+            guau           El perro te dice una frase
+            info           Información del ordenador con el logo
+
+            🎮  JUEGOS
+            ─────────────────────────────────────────────
+            tetris         Tetris (bastet)
+            marcianos      Space Invaders
+            luna           Coche lunar saltando cráteres
+
+            🛠  ÚTILES
+            ─────────────────────────────────────────────
+            htop           Ver qué programas usan el ordenador (q para salir)
+            nano archivo   Editar un archivo de texto
+            curl URL       Descargar o ver una web desde la terminal
+
+            💾 Todo lo que hagas se guarda solo en el USB, aunque lo uses en otro ordenador.
+
+            Truco: Ctrl+C para parar cualquier cosa. Escribe 'clear' para limpiar.
+          EOF
+          DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/usr/local/bin/dartz-fondo")"
+          cat > "config/includes.chroot/usr/local/bin/dartz-fondo" <<'DZ_FIN'
+          #!/bin/bash
+          # Pone el fondo del perrito en todas las pantallas (solo la primera vez)
+          MARCA="$HOME/.config/dartzos-fondo-puesto"
+          [ -f "$MARCA" ] && exit 0
+          sleep 3
+          FONDO=/usr/share/backgrounds/dartzos/fondo.png
+          for M in $(xrandr --listmonitors 2>/dev/null | awk 'NR>1{print $4}') 0 eDP-1 eDP1; do
+            xfconf-query -c xfce4-desktop -p "/backdrop/screen0/monitor$M/workspace0/last-image" -n -t string -s "$FONDO" 2>/dev/null
+            xfconf-query -c xfce4-desktop -p "/backdrop/screen0/monitor$M/workspace0/image-style" -n -t int -s 5 2>/dev/null
+          done
+          for P in $(xfconf-query -c xfce4-desktop -l 2>/dev/null | grep last-image); do
+            xfconf-query -c xfce4-desktop -p "$P" -s "$FONDO"
+          done
+          mkdir -p "$HOME/.config" && touch "$MARCA"
+          DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/usr/local/sbin/dartz-memoria-auto")"
+          cat > "config/includes.chroot/usr/local/sbin/dartz-memoria-auto" <<'DZ_FIN'
+          #!/bin/bash
+          # DartzOS: la primera vez que arranca desde un USB, crea la "memoria"
+          # en el espacio libre del USB para que TODO lo que hagas se guarde ahí.
+          # Después reinicia una sola vez. Solo toca el USB, nunca el disco del ordenador.
+
+          blkid -L persistence >/dev/null 2>&1 && exit 0      # ya tiene memoria
+          grep -qw persistence /proc/cmdline || exit 0
+
+          ORIGEN=$(findmnt -n -o SOURCE /run/live/medium 2>/dev/null) || exit 0
+          [ -n "$ORIGEN" ] || exit 0
+          if [ "$(lsblk -dno TYPE "$ORIGEN" 2>/dev/null)" = "disk" ]; then
+            DISCO="$ORIGEN"
+          else
+            DISCO="/dev/$(lsblk -no PKNAME "$ORIGEN" 2>/dev/null | head -1)"
+          fi
+          [ -b "$DISCO" ] || exit 0
+          [ "$(lsblk -dno TRAN "$DISCO" 2>/dev/null)" = "usb" ] || exit 0   # solo USB
+
+          # ¿Hay al menos 1 GB libre en el USB?
+          LIBRE=$(sfdisk -F "$DISCO" 2>/dev/null | awk '/^ *[0-9]+ +[0-9]+ +[0-9]+/{if($3>m)m=$3} END{print m+0}')
+          [ "$LIBRE" -gt 2097152 ] || exit 0
+
+          msg(){ plymouth display-message --text="$1" 2>/dev/null; echo "$1"; }
+          msg "Preparando la memoria de DartzOS en el USB... (solo esta vez)"
+
+          echo ",,L" | sfdisk --append --force --no-reread "$DISCO" || exit 0
+          partx -a "$DISCO" 2>/dev/null || partx -u "$DISCO" 2>/dev/null || true
+          udevadm settle 2>/dev/null; sleep 2
+          NUEVA=$(lsblk -lnpo NAME,TYPE "$DISCO" | awk '$2=="part"{p=$1} END{print p}')
+          [ -b "$NUEVA" ] || exit 0
+          mkfs.ext4 -q -F -L persistence "$NUEVA" || exit 0
+          mkdir -p /mnt/dartz-memoria
+          mount "$NUEVA" /mnt/dartz-memoria || exit 0
+          echo "/ union" > /mnt/dartz-memoria/persistence.conf
+          sync; umount /mnt/dartz-memoria
+
+          msg "¡Memoria lista! Reiniciando DartzOS... 🐶"
+          sleep 4
+          systemctl reboot
+          DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/usr/share/applications/dartz-ayuda.desktop")"
+          cat > "config/includes.chroot/usr/share/applications/dartz-ayuda.desktop" <<'DZ_FIN'
+          [Desktop Entry]
+          Type=Application
+          Name=Comandos chulos de DartzOS
+          Comment=Lista de comandos divertidos para la terminal
+          Exec=xfce4-terminal --hold --title=Ayuda -x ayuda
+          Icon=dartzos
+          Categories=System;
+          DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/usr/share/applications/dartz-forrest.desktop")"
+          cat > "config/includes.chroot/usr/share/applications/dartz-forrest.desktop" <<'DZ_FIN'
+          [Desktop Entry]
+          Type=Application
+          Name=Forrest corriendo
+          Comment=Forrest Gump en ASCII desde ascii.live
+          Exec=xfce4-terminal --title=Forrest -x curl ascii.live/forrest
+          Icon=dartzos
+          Categories=Utility;
+          DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/usr/share/dartzos/perro.txt")"
+          cat > "config/includes.chroot/usr/share/dartzos/perro.txt" <<'DZ_FIN'
+          $1    /\     $3>o<$1     /\
+          $1   /  \___________/  \
+          $1   |    ^       ^    |
+          $1   |      \(@)/      |
+          $1 _  \      \_v_/      /  _
+          $1(o)\ '-.___________.-' /(o)
+          $1 \  \$2/~~~~~~~~~~~~~~~\$1/  /
+          $1  \_$2|   .-~~~~~~~-.   |$1_/
+          $2    |  (           )  |
+          $2    |  (     .     )  |
+          $1 _  $2\   '-._____.-'   /$1  _
+          $1(o)--$2-'-._________.-'-$1--(o)
+          $2            \_/
+          DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/usr/share/plymouth/themes/dartzos/dartzos.plymouth")"
+          cat > "config/includes.chroot/usr/share/plymouth/themes/dartzos/dartzos.plymouth" <<'DZ_FIN'
+          [Plymouth Theme]
+          Name=DartzOS
+          Description=El perrito de DartzOS mientras arranca
+          ModuleName=script
+
+          [script]
+          ImageDir=/usr/share/plymouth/themes/dartzos
+          ScriptFile=/usr/share/plymouth/themes/dartzos/dartzos.script
+          DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/usr/share/plymouth/themes/dartzos/dartzos.script")"
+          cat > "config/includes.chroot/usr/share/plymouth/themes/dartzos/dartzos.script" <<'DZ_FIN'
+          // Pantalla de arranque de DartzOS: el perrito y una barra de carga
+
+          Window.SetBackgroundTopColor(0.16, 0.20, 0.31);
+          Window.SetBackgroundBottomColor(0.05, 0.06, 0.12);
+
+          logo.image = Image("logo.png");
+          logo.sprite = Sprite(logo.image);
+          logo.x = Window.GetX() + Window.GetWidth() / 2 - logo.image.GetWidth() / 2;
+          logo.y = Window.GetY() + Window.GetHeight() / 2 - logo.image.GetHeight() / 2 - 40;
+          logo.sprite.SetPosition(logo.x, logo.y, 0);
+
+          titulo.image = Image.Text("DartzOS", 0.95, 0.90, 0.83);
+          titulo.sprite = Sprite(titulo.image);
+          titulo.sprite.SetPosition(Window.GetX() + Window.GetWidth() / 2 - titulo.image.GetWidth() / 2,
+                                    logo.y + logo.image.GetHeight() + 20, 1);
+
+          barra.image = Image("barra.png");
+          barra.sprite = Sprite();
+          barra.x = Window.GetX() + Window.GetWidth() / 2 - 120;
+          barra.y = logo.y + logo.image.GetHeight() + 60;
+
+          fun progreso(duracion, avance) {
+            ancho = Math.Int(240 * avance);
+            if (ancho < 1) ancho = 1;
+            barra.sprite.SetImage(barra.image.Scale(ancho, 6));
+            barra.sprite.SetPosition(barra.x, barra.y, 1);
+          }
+          Plymouth.SetBootProgressFunction(progreso);
+          DZ_FIN
+          mkdir -p "$(dirname "config/package-lists/dartzos.list.chroot")"
+          cat > "config/package-lists/dartzos.list.chroot" <<'DZ_FIN'
+          # ===== Paquetes de DartzOS =====
+
+          # Sistema live (arrancar desde el USB)
+          live-boot
+          live-config
+          live-config-systemd
+          user-setup
+          sudo
+          locales
+          console-setup
+          keyboard-configuration
+          fdisk
+          e2fsprogs
+
+          # Escritorio con ventanas (XFCE)
+          xorg
+          xfce4
+          xfce4-terminal
+          xfce4-whiskermenu-plugin
+          xfce4-pulseaudio-plugin
+          xfce4-power-manager
+          xfce4-screenshooter
+          xfce4-taskmanager
+          xfce4-notifyd
+          lightdm
+          lightdm-gtk-greeter
+          greybird-gtk-theme
+          elementary-xfce-icon-theme
+          mousepad
+          ristretto
+          thunar-archive-plugin
+          file-roller
+          fonts-dejavu
+          fonts-noto-color-emoji
+
+          # Internet
+          network-manager
+          network-manager-gnome
+          firefox-esr
+          firefox-esr-l10n-es-es
+          curl
+          wget
+          ca-certificates
+
+          # Sonido
+          pipewire
+          pipewire-pulse
+          wireplumber
+          pavucontrol
+
+          # Terminal y diversión
+          fastfetch
+          htop
+          nano
+          git
+          cmatrix
+          sl
+          cowsay
+          figlet
+          lolcat
+          fortune-mod
+          fortunes-es
+          bastet
+          ninvaders
+          moon-buggy
+
+          # Cosas del MacBook Pro 2015 (WiFi Broadcom, ventiladores, procesador)
+          firmware-brcm80211
+          firmware-misc-nonfree
+          firmware-linux-free
+          intel-microcode
+          mbpfan
+
+          # Pantalla de arranque con el perrito
+          plymouth
+          plymouth-themes
+          DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/etc/skel/.config/fastfetch/config.jsonc")"
+          cat > "config/includes.chroot/etc/skel/.config/fastfetch/config.jsonc" <<'DZ_FIN'
+          {
+            "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
+            "logo": {
+              "type": "file",
+              "source": "/usr/share/dartzos/perro.txt",
+              "color": { "1": "yellow", "2": "blue", "3": "magenta" },
+              "padding": { "right": 3 }
+            },
+            "display": { "separator": "  " },
+            "modules": [
+              "title",
+              "separator",
+              { "type": "os", "key": "Sistema   " },
+              { "type": "kernel", "key": "Kernel    " },
+              { "type": "uptime", "key": "Encendido " },
+              { "type": "host", "key": "Ordenador " },
+              { "type": "cpu", "key": "Procesador" },
+              { "type": "gpu", "key": "Gráficos  " },
+              { "type": "memory", "key": "Memoria   " },
+              { "type": "disk", "key": "Disco     " },
+              { "type": "localip", "key": "Red       " },
+              { "type": "battery", "key": "Batería   " },
+              "break",
+              "colors"
+            ]
+          }
+          DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml")"
+          cat > "config/includes.chroot/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml" <<'DZ_FIN'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!-- Ventanas: botoncitos de minimizar, maximizar y cerrar, tamaño Retina -->
+          <channel name="xfwm4" version="1.0">
+            <property name="general" type="empty">
+              <property name="theme" type="string" value="Default-xhdpi"/>
+              <property name="button_layout" type="string" value="O|HMC"/>
+              <property name="title_alignment" type="string" value="center"/>
+              <property name="use_compositing" type="bool" value="true"/>
+            </property>
+          </channel>
+          DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml")"
+          cat > "config/includes.chroot/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml" <<'DZ_FIN'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!-- Aspecto de DartzOS: tema oscuro y todo al doble de tamaño para la pantalla Retina del MacBook -->
+          <channel name="xsettings" version="1.0">
+            <property name="Net" type="empty">
+              <property name="ThemeName" type="string" value="Greybird-dark"/>
+              <property name="IconThemeName" type="string" value="elementary-xfce-dark"/>
+            </property>
+            <property name="Gdk" type="empty">
+              <property name="WindowScalingFactor" type="int" value="2"/>
+            </property>
+            <property name="Gtk" type="empty">
+              <property name="CursorThemeSize" type="int" value="48"/>
+              <property name="FontName" type="string" value="DejaVu Sans 10"/>
+              <property name="MonospaceFontName" type="string" value="DejaVu Sans Mono 11"/>
+            </property>
+          </channel>
+          DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/usr/share/dartzos/logo.svg")"
+          cat > "config/includes.chroot/usr/share/dartzos/logo.svg" <<'DZ_FIN'
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+            <defs>
+              <radialGradient id="belly" cx="50%" cy="45%" r="60%">
+                <stop offset="0%" stop-color="#FFF1DC"/>
+                <stop offset="100%" stop-color="#EBC796"/>
+              </radialGradient>
+              <linearGradient id="steel" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stop-color="#3B4757"/>
+                <stop offset="50%" stop-color="#5D6E84"/>
+                <stop offset="100%" stop-color="#3B4757"/>
+              </linearGradient>
+              <radialGradient id="gold" cx="50%" cy="40%" r="65%">
+                <stop offset="0%" stop-color="#E0A45A"/>
+                <stop offset="100%" stop-color="#B9772F"/>
+              </radialGradient>
+            </defs>
+
+            <g stroke="#1C1B22" stroke-width="7" stroke-linejoin="round" stroke-linecap="round">
+              <!-- tail (short fluffy yorkie tail) -->
+              <path d="M256 424 c-22 4 -30 30 -18 46 l6 -10 6 14 8 -12 8 12 6 -14 6 10 c12 -16 4 -42 -22 -46 Z" fill="#4E5D71"/>
+              <!-- back legs: raised up toward the viewer, pads showing -->
+              <g transform="rotate(-28 160 400)">
+                <rect x="128" y="352" width="64" height="98" rx="32" fill="url(#gold)"/>
+              </g>
+              <g transform="rotate(28 352 400)">
+                <rect x="320" y="352" width="64" height="98" rx="32" fill="url(#gold)"/>
+              </g>
+
+              <!-- shaggy long-haired body (steel blue fur) -->
+              <path fill="url(#steel)" d="
+                M256 150
+                C330 150 372 200 378 262
+                l14 10 -12 8 16 14 -16 6 14 16 -18 4 10 18 -20 0
+                C352 404 306 440 256 440
+                C206 440 160 404 152 338
+                l-20 0 10 -18 -18 -4 14 -16 -16 -6 16 -14 -12 -8 14 -10
+                C140 200 182 150 256 150 Z"/>
+
+              <!-- belly -->
+              <ellipse cx="256" cy="318" rx="74" ry="98" fill="url(#belly)" stroke-width="5"/>
+              <!-- belly button & fur tufts -->
+              <path d="M250 340 q6 6 12 0" fill="none" stroke-width="4"/>
+              <path d="M236 262 q8 -8 14 0 M262 262 q8 -8 14 0" fill="none" stroke="#C9A06B" stroke-width="4"/>
+
+              <!-- front paws: bent up beside the head, pads toward viewer -->
+              <g transform="rotate(38 168 214)">
+                <rect x="136" y="180" width="60" height="92" rx="30" fill="url(#gold)"/>
+              </g>
+              <g transform="rotate(-38 344 214)">
+                <rect x="316" y="180" width="60" height="92" rx="30" fill="url(#gold)"/>
+              </g>
+
+              <!-- ears -->
+              <path d="M190 112 L176 22 L240 76 Z" fill="url(#gold)"/>
+              <path d="M322 112 L336 22 L272 76 Z" fill="url(#gold)"/>
+              <path d="M196 96 L188 48 L224 80 Z" fill="#F2B8A8" stroke="none"/>
+              <path d="M316 96 L324 48 L288 80 Z" fill="#F2B8A8" stroke="none"/>
+
+              <!-- head -->
+              <path fill="url(#gold)" d="
+                M256 48
+                C318 48 352 92 350 140
+                l12 10 -14 6 8 14 -16 2
+                C330 210 296 230 256 230
+                C216 230 182 210 172 172
+                l-16 -2 8 -14 -14 -6 12 -10
+                C160 92 194 48 256 48 Z"/>
+
+              <!-- muzzle -->
+              <ellipse cx="256" cy="172" rx="50" ry="38" fill="#F7DDB6" stroke-width="5"/>
+
+              <!-- happy closed eyes -->
+              <path d="M206 128 q14 -16 28 0" fill="none" stroke-width="8"/>
+              <path d="M278 128 q14 -16 28 0" fill="none" stroke-width="8"/>
+
+              <!-- nose -->
+              <path d="M238 152 q18 -10 36 0 q-4 18 -18 20 q-14 -2 -18 -20 Z" fill="#1C1B22"/>
+              <!-- mouth -->
+              <path d="M256 172 v10 M256 182 q-14 14 -26 2 M256 182 q14 14 26 2" fill="none" stroke-width="5"/>
+              <!-- tongue -->
+              <path d="M246 188 q10 30 20 0 Z" fill="#E9667A" stroke-width="5"/>
+
+              <!-- top-knot bow -->
+              <path d="M256 60 L222 40 L224 80 Z" fill="#E94B7A"/>
+              <path d="M256 60 L290 40 L288 80 Z" fill="#E94B7A"/>
+              <circle cx="256" cy="60" r="11" fill="#FF7FA3"/>
+            </g>
+
+            <!-- paw pads (no outline) -->
+            <g fill="#3A2C2C">
+              <!-- front left -->
+              <g transform="translate(150 238) rotate(38)">
+                <ellipse cx="0" cy="8" rx="13" ry="10"/>
+                <circle cx="-14" cy="-10" r="5.5"/><circle cx="-4" cy="-16" r="5.5"/>
+                <circle cx="6" cy="-16" r="5.5"/><circle cx="15" cy="-9" r="5.5"/>
+              </g>
+              <!-- front right -->
+              <g transform="translate(362 238) rotate(-38)">
+                <ellipse cx="0" cy="8" rx="13" ry="10"/>
+                <circle cx="-15" cy="-9" r="5.5"/><circle cx="-6" cy="-16" r="5.5"/>
+                <circle cx="4" cy="-16" r="5.5"/><circle cx="14" cy="-10" r="5.5"/>
+              </g>
+              <!-- back left -->
+              <g transform="translate(148 384) rotate(-28)">
+                <ellipse cx="0" cy="10" rx="15" ry="11"/>
+                <circle cx="-16" cy="-9" r="6"/><circle cx="-5" cy="-16" r="6"/>
+                <circle cx="6" cy="-16" r="6"/><circle cx="17" cy="-9" r="6"/>
+              </g>
+              <!-- back right -->
+              <g transform="translate(364 384) rotate(28)">
+                <ellipse cx="0" cy="10" rx="15" ry="11"/>
+                <circle cx="-17" cy="-9" r="6"/><circle cx="-6" cy="-16" r="6"/>
+                <circle cx="5" cy="-16" r="6"/><circle cx="16" cy="-9" r="6"/>
+              </g>
+            </g>
+          </svg>
+          DZ_FIN
+          mkdir -p "$(dirname "/tmp/fondo.svg")"
+          cat > "/tmp/fondo.svg" <<'DZ_FIN'
+          <svg xmlns="http://www.w3.org/2000/svg" width="2560" height="1600" viewBox="0 0 2560 1600">
+          <defs><radialGradient id="bg" cx="50%" cy="40%" r="75%"><stop offset="0%" stop-color="#2A3350"/><stop offset="100%" stop-color="#0E1020"/></radialGradient></defs>
+          <rect width="2560" height="1600" fill="url(#bg)"/>
+          <g transform="translate(970 330) scale(1.2109375)">
+          @LOGO@
+          </g>
+          <text x="1280" y="1090" text-anchor="middle" font-family="DejaVu Sans" font-weight="bold" font-size="140" fill="#F3E6D3">Dartz<tspan fill="#E9A85A">OS</tspan></text>
+          <text x="1280" y="1160" text-anchor="middle" font-family="DejaVu Sans" font-size="44" fill="#8E97B5">guau.</text>
+          </svg>
+          DZ_FIN
+          mkdir -p "$(dirname "/tmp/grub.svg")"
+          cat > "/tmp/grub.svg" <<'DZ_FIN'
+          <svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480">
+          <defs><radialGradient id="bg" cx="50%" cy="40%" r="75%"><stop offset="0%" stop-color="#2A3350"/><stop offset="100%" stop-color="#0E1020"/></radialGradient></defs>
+          <rect width="640" height="480" fill="url(#bg)"/>
+          <g transform="translate(205 60) scale(0.44921875)">
+          @LOGO@
+          </g>
+          <text x="320" y="345" text-anchor="middle" font-family="DejaVu Sans" font-weight="bold" font-size="50" fill="#F3E6D3">Dartz<tspan fill="#E9A85A">OS</tspan></text>
+          </svg>
+          DZ_FIN
+
+          echo '🐶 Dibujando el perrito (logo, fondo, arranque)'
+          D=config/includes.chroot/usr/share/dartzos
+          P=config/includes.chroot/usr/share/plymouth/themes/dartzos
+          LOGO="$D/logo.svg"
+          for f in /tmp/fondo.svg /tmp/grub.svg; do
+            python3 - "$f" "$LOGO" <<'PY'
+          import sys
+          f, logo = sys.argv[1], sys.argv[2]
+          lines = open(logo).read().splitlines()
+          i = next(n for n, l in enumerate(lines) if l.startswith('<svg'))
+          body = "\n".join(lines[i+1:-1])
+          s = open(f).read().replace("@LOGO@", body)
+          open(f, "w").write(s)
+          PY
+          done
+          rsvg-convert -w 128 "$LOGO" -o "$D/icono-128.png"
+          rsvg-convert -w 400 "$LOGO" -o "$P/logo.png"
+          rsvg-convert /tmp/fondo.svg -o "$D/fondo.png"
+          convert -size 240x6 xc:'#E9A85A' "$P/barra.png"
+          chmod +x config/hooks/normal/*.hook.chroot config/includes.chroot/usr/local/bin/* config/includes.chroot/usr/local/sbin/*
+
+          if [ -d /usr/share/live/build/bootloaders/grub-pc ]; then
+            mkdir -p config/bootloaders
+            cp -r /usr/share/live/build/bootloaders/grub-pc config/bootloaders/
+            rsvg-convert /tmp/grub.svg -o config/bootloaders/grub-pc/splash.png
+            grep -rlI "Live system" config/bootloaders/grub-pc 2>/dev/null | xargs -r sed -i 's/Live system/DartzOS/g' || true
+          fi
+
+          echo '🐶 [4/5] Construyendo (20-40 minutos)'
+          lb build 2>&1 | tee "$SALIDA/construccion.log" || true
+
+          echo '🐶 [5/5] Resultado'
+          ISO=$(ls "$B"/*.iso 2>/dev/null | head -1 || true)
+          [ -n "$ISO" ] || { echo '❌ No se ha creado la ISO. Pasale construccion.log a Claude.'; exit 1; }
+          cp "$ISO" "$SALIDA/DartzOS.iso"
+          echo "✅ DartzOS listo: $(du -h "$SALIDA/DartzOS.iso" | cut -f1)"
+          DARTZOS_SCRIPT_FIN
+          sudo docker run --rm --privileged -v "$PWD/dartzos":/dartzos debian:trixie bash /dartzos/construir.sh
+
+      - name: Descargar DartzOS
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DartzOS
+          path: dartzos/salida/DartzOS.iso
+          compression-level: 0
+
+      - name: Registro (por si falla)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: registro
+          path: dartzos/salida/construccion.log
+          if-no-files-found: ignore
