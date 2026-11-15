@@ -1,5 +1,5 @@
 # ===================================================
-#   DartzOS 1.2 "Guau" - se construye solo en GitHub
+#   DartzOS 1.3 "Guau" - se construye solo en GitHub
 # ===================================================
 name: Construir DartzOS
 
@@ -26,7 +26,7 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           echo '🐶 [1/5] Herramientas'
           apt-get update
-          apt-get install -y live-build debootstrap xorriso squashfs-tools mtools dosfstools grub-efi-amd64-bin grub-pc-bin cpio rsync librsvg2-bin imagemagick fonts-dejavu-core python3
+          apt-get install -y live-build debootstrap xorriso squashfs-tools mtools dosfstools grub-efi-amd64-bin grub-pc-bin cpio rsync librsvg2-bin imagemagick fonts-dejavu-core fonts-inter python3
           echo '🐶 [2/5] Configuracion'
           rm -rf "$B" && mkdir -p "$B" && cd "$B"
           lb config \
@@ -51,16 +51,16 @@ jobs:
           echo ">>> Poniendo nombre: DartzOS"
           rm -f /etc/os-release
           cat > /etc/os-release <<'EOF'
-          PRETTY_NAME="DartzOS 1.2 (Guau)"
+          PRETTY_NAME="DartzOS 1.3 (Guau)"
           NAME="DartzOS"
-          VERSION_ID="1.2"
-          VERSION="1.2 (Guau)"
+          VERSION_ID="1.3"
+          VERSION="1.3 (Guau)"
           VERSION_CODENAME=trixie
           ID=debian
           HOME_URL="https://www.debian.org/"
           EOF
-          printf 'DartzOS 1.2 (Guau) \\n \\l\n\n' > /etc/issue
-          echo "DartzOS 1.2 (Guau)" > /etc/issue.net
+          printf 'DartzOS 1.3 (Guau) \\n \\l\n\n' > /etc/issue
+          echo "DartzOS 1.3 (Guau)" > /etc/issue.net
 
           echo ">>> Icono del perrito"
           mkdir -p /usr/share/icons/hicolor/128x128/apps /usr/share/icons/hicolor/scalable/apps
@@ -76,14 +76,94 @@ jobs:
           plymouth-set-default-theme dartzos || true
           update-initramfs -u -k all
 
-          echo ">>> Panel del escritorio (sin preguntas la primera vez, con el perrito en el menú)"
+          echo ">>> Panel tipo macOS: barra de arriba + dock abajo"
           XML=/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml
-          mkdir -p "$XML"
-          if [ -f /etc/xdg/xfce4/panel/default.xml ] && [ ! -f "$XML/xfce4-panel.xml" ]; then
-            cp /etc/xdg/xfce4/panel/default.xml "$XML/xfce4-panel.xml"
-            sed -i 's|value="applicationsmenu"/>|value="applicationsmenu"><property name="button-icon" type="string" value="dartzos"/><property name="button-title" type="string" value="DartzOS"/></property>|' "$XML/xfce4-panel.xml"
-          fi
-
+          mkdir -p "$XML" /etc/skel/.config/xfce4/panel
+          apt-get install -y xfce4-docklike-plugin >/dev/null 2>&1 || true
+          if ls /usr/lib/*/xfce4/panel/plugins/libdocklike* >/dev/null 2>&1; then DOCK=docklike; else DOCK=tasklist; fi
+          echo "    dock=$DOCK"
+          cat > "$XML/xfce4-panel.xml" <<EOX
+          <?xml version="1.0" encoding="UTF-8"?>
+          <channel name="xfce4-panel" version="1.0">
+            <property name="configver" type="int" value="2"/>
+            <property name="panels" type="array">
+              <value type="int" value="1"/>
+              <value type="int" value="2"/>
+              <property name="dark-mode" type="bool" value="true"/>
+              <property name="panel-1" type="empty">
+                <property name="position" type="string" value="p=6;x=0;y=0"/>
+                <property name="length" type="uint" value="100"/>
+                <property name="position-locked" type="bool" value="true"/>
+                <property name="size" type="uint" value="22"/>
+                <property name="icon-size" type="uint" value="14"/>
+                <property name="background-style" type="uint" value="1"/>
+                <property name="background-rgba" type="array">
+                  <value type="double" value="0.0"/><value type="double" value="0.0"/><value type="double" value="0.0"/><value type="double" value="1.0"/>
+                </property>
+                <property name="plugin-ids" type="array">
+                  <value type="int" value="1"/><value type="int" value="2"/><value type="int" value="3"/><value type="int" value="4"/><value type="int" value="5"/><value type="int" value="6"/><value type="int" value="7"/>
+                </property>
+              </property>
+              <property name="panel-2" type="empty">
+                <property name="position" type="string" value="p=10;x=0;y=0"/>
+                <property name="length" type="uint" value="1"/>
+                <property name="length-adjust" type="bool" value="true"/>
+                <property name="position-locked" type="bool" value="true"/>
+                <property name="size" type="uint" value="56"/>
+                <property name="icon-size" type="uint" value="44"/>
+                <property name="background-style" type="uint" value="1"/>
+                <property name="background-rgba" type="array">
+                  <value type="double" value="0.165"/><value type="double" value="0.165"/><value type="double" value="0.173"/><value type="double" value="0.80"/>
+                </property>
+                <property name="plugin-ids" type="array">
+                  <value type="int" value="20"/>
+                </property>
+              </property>
+            </property>
+            <property name="plugins" type="empty">
+              <property name="plugin-1" type="string" value="whiskermenu"/>
+              <property name="plugin-2" type="string" value="separator">
+                <property name="expand" type="bool" value="true"/>
+                <property name="style" type="uint" value="0"/>
+              </property>
+              <property name="plugin-3" type="string" value="systray">
+                <property name="square-icons" type="bool" value="true"/>
+              </property>
+              <property name="plugin-4" type="string" value="pulseaudio"/>
+              <property name="plugin-5" type="string" value="power-manager-plugin"/>
+              <property name="plugin-6" type="string" value="notification-plugin"/>
+              <property name="plugin-7" type="string" value="clock">
+                <property name="mode" type="uint" value="2"/>
+                <property name="digital-layout" type="uint" value="3"/>
+                <property name="digital-time-format" type="string" value="%a %-d %b  %H:%M"/>
+                <property name="digital-time-font" type="string" value="Inter 9"/>
+              </property>
+              <property name="plugin-20" type="string" value="$DOCK">
+                <property name="show-labels" type="bool" value="false"/>
+                <property name="flat-buttons" type="bool" value="true"/>
+                <property name="show-handle" type="bool" value="false"/>
+              </property>
+            </property>
+          </channel>
+          EOX
+          cat > /etc/skel/.config/xfce4/panel/whiskermenu-1.rc <<'EOX'
+          button-icon=dartzos
+          button-title=
+          show-button-title=false
+          show-button-icon=true
+          launcher-show-name=true
+          launcher-show-description=false
+          position-categories-alternate=true
+          menu-width=520
+          menu-height=560
+          favorites=firefox-esr.desktop,xfce4-terminal.desktop,thunar.desktop,dartz-ayuda.desktop,dartz-forrest.desktop,xfce4-settings-manager.desktop
+          EOX
+          cat > /etc/skel/.config/xfce4/panel/docklike-20.rc <<'EOX'
+          [user]
+          pinned=/usr/share/applications/thunar.desktop;/usr/share/applications/firefox-esr.desktop;/usr/share/applications/xfce4-terminal.desktop;/usr/share/applications/mousepad.desktop;/usr/share/applications/xfce4-settings-manager.desktop;/usr/share/applications/dartz-ayuda.desktop;
+          indicatorStyle=2
+          indicatorOrientation=0
+          EOX
 
           echo ">>> Aspecto tipo macOS: tema WhiteSur, iconos, cursor y letra Inter"
           TEMA=Greybird-dark; ICONOS=elementary-xfce-dark; CURSOR=Adwaita; VENTANAS=Default-xhdpi
@@ -93,7 +173,7 @@ jobs:
             echo "    (reintentando descarga de WhiteSur-gtk...)"; rm -rf $T/gtk; sleep 5
           done
           if [ -x $T/gtk/install.sh ]; then
-            (cd $T/gtk && HOME=/root ./install.sh -d /usr/share/themes -c dark -o normal) 2>&1 | tail -20 || true
+            (cd $T/gtk && HOME=/root bash ./install.sh -d /usr/share/themes -c dark; echo "    install.sh termino con codigo $?") 2>&1 | tail -30 || true
             ls /usr/share/themes | grep -i whitesur || echo "    WhiteSur-gtk NO se instalo"
           fi
           if git clone --depth 1 https://github.com/vinceliuice/WhiteSur-icon-theme.git $T/icons >/dev/null 2>&1; then
@@ -104,6 +184,11 @@ jobs:
           fi
           rm -rf $T
           [ -d /usr/share/themes/WhiteSur-Dark ] && TEMA=WhiteSur-Dark
+          if [ "$TEMA" = Greybird-dark ]; then
+            echo "    Plan B: tema Arc-Dark de Debian"
+            apt-get install -y arc-theme >/dev/null 2>&1 || true
+            [ -d /usr/share/themes/Arc-Dark ] && TEMA=Arc-Dark
+          fi
           for v in WhiteSur-Dark-xhdpi WhiteSur-Dark-hdpi WhiteSur-Dark; do
             [ -d /usr/share/themes/$v/xfwm4 ] && { VENTANAS=$v; break; }
           done
@@ -143,12 +228,44 @@ jobs:
               <property name="button_layout" type="string" value="CHM|"/>
               <property name="title_alignment" type="string" value="center"/>
               <property name="title_font" type="string" value="Inter Semi-Bold 10"/>
-              <property name="use_compositing" type="bool" value="false"/>
+              <property name="use_compositing" type="bool" value="true"/>
+              <property name="show_dock_shadow" type="bool" value="true"/>
+              <property name="frame_opacity" type="int" value="100"/>
             </property>
           </channel>
           EOX
           mkdir -p /etc/skel/.icons/default
           printf '[Icon Theme]\nInherits=%s\n' "$CURSOR" > /etc/skel/.icons/default/index.theme
+
+          echo ">>> Estilo Apple: un solo color de accion (azul), terminal y fuentes"
+          mkdir -p /etc/skel/.config/gtk-3.0 /etc/skel/.config/gtk-4.0
+          cat > /etc/skel/.config/gtk-3.0/gtk.css <<'EOX'
+          /* DartzOS: un unico color de accion, el azul (#0071e3), como en el diseno de Apple */
+          @define-color theme_selected_bg_color #0071e3;
+          @define-color selected_bg_color #0071e3;
+          @define-color accent_color #2997ff;
+          @define-color accent_bg_color #0071e3;
+          @define-color theme_selected_fg_color #ffffff;
+          EOX
+          cp /etc/skel/.config/gtk-3.0/gtk.css /etc/skel/.config/gtk-4.0/gtk.css
+          cat > "$XML/xfce4-terminal.xml" <<'EOX'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <channel name="xfce4-terminal" version="1.0">
+            <property name="font-name" type="string" value="DejaVu Sans Mono 11"/>
+            <property name="font-use-system" type="bool" value="false"/>
+            <property name="color-use-theme" type="bool" value="false"/>
+            <property name="color-background" type="string" value="#1d1d1f"/>
+            <property name="color-foreground" type="string" value="#f5f5f7"/>
+            <property name="color-cursor" type="string" value="#2997ff"/>
+            <property name="color-cursor-use-default" type="bool" value="false"/>
+            <property name="color-selection" type="string" value="#0071e3"/>
+            <property name="color-selection-use-default" type="bool" value="false"/>
+            <property name="misc-cursor-shape" type="string" value="TERMINAL_CURSOR_SHAPE_IBEAM"/>
+            <property name="misc-menubar-default" type="bool" value="false"/>
+            <property name="misc-borders-default" type="bool" value="true"/>
+            <property name="scrolling-bar" type="string" value="TERMINAL_SCROLLBAR_NONE"/>
+          </channel>
+          EOX
 
           echo ">>> Menos escrituras en el USB (para que vaya mas rapido)"
           systemctl mask apt-daily.timer apt-daily-upgrade.timer man-db.timer e2scrub_all.timer 2>/dev/null || true
@@ -416,7 +533,7 @@ jobs:
           DZ_FIN
           mkdir -p "$(dirname "config/includes.chroot/usr/share/dartzos/perro.txt")"
           cat > "config/includes.chroot/usr/share/dartzos/perro.txt" <<'DZ_FIN'
-          $1    /\     $3>o<$1     /\
+          $1    /\     ~~~     /\
           $1   /  \___________/  \
           $1   |    ^       ^    |
           $1   |      \(@)/      |
@@ -445,8 +562,8 @@ jobs:
           cat > "config/includes.chroot/usr/share/plymouth/themes/dartzos/dartzos.script" <<'DZ_FIN'
           // Pantalla de arranque de DartzOS: el perrito y una barra de carga
 
-          Window.SetBackgroundTopColor(0.16, 0.20, 0.31);
-          Window.SetBackgroundBottomColor(0.05, 0.06, 0.12);
+          Window.SetBackgroundTopColor(0, 0, 0);
+          Window.SetBackgroundBottomColor(0, 0, 0);
 
           logo.image = Image("logo.png");
           logo.sprite = Sprite(logo.image);
@@ -454,7 +571,7 @@ jobs:
           logo.y = Window.GetY() + Window.GetHeight() / 2 - logo.image.GetHeight() / 2 - 40;
           logo.sprite.SetPosition(logo.x, logo.y, 0);
 
-          titulo.image = Image.Text("DartzOS", 0.95, 0.90, 0.83);
+          titulo.image = Image.Text("DartzOS", 1, 1, 1);
           titulo.sprite = Sprite(titulo.image);
           titulo.sprite.SetPosition(Window.GetX() + Window.GetWidth() / 2 - titulo.image.GetWidth() / 2,
                                     logo.y + logo.image.GetHeight() + 20, 1);
@@ -687,10 +804,8 @@ jobs:
               <!-- tongue -->
               <path d="M246 188 q10 30 20 0 Z" fill="#E9667A" stroke-width="5"/>
 
-              <!-- top-knot bow -->
-              <path d="M256 60 L222 40 L224 80 Z" fill="#E94B7A"/>
-              <path d="M256 60 L290 40 L288 80 Z" fill="#E94B7A"/>
-              <circle cx="256" cy="60" r="11" fill="#FF7FA3"/>
+              <!-- mechon de pelo en la cabeza (sin lazo) -->
+              <path d="M232 62 q10 -26 24 -6 q12 -24 26 4 q-10 10 -26 10 q-14 0 -24 -8 Z" fill="url(#gold)"/>
             </g>
 
             <!-- paw pads (no outline) -->
@@ -725,24 +840,31 @@ jobs:
           mkdir -p "$(dirname "/tmp/fondo.svg")"
           cat > "/tmp/fondo.svg" <<'DZ_FIN'
           <svg xmlns="http://www.w3.org/2000/svg" width="2560" height="1600" viewBox="0 0 2560 1600">
-          <defs><radialGradient id="bg" cx="50%" cy="40%" r="75%"><stop offset="0%" stop-color="#2A3350"/><stop offset="100%" stop-color="#0E1020"/></radialGradient></defs>
-          <rect width="2560" height="1600" fill="url(#bg)"/>
-          <g transform="translate(970 330) scale(1.2109375)">
+          <!-- Estilo "tile oscuro": color plano, sin degradados; la unica sombra es la del "producto" (el perrito) -->
+          <defs>
+            <filter id="sombra" x="-30%" y="-30%" width="160%" height="160%">
+              <feDropShadow dx="6" dy="10" stdDeviation="30" flood-color="#000000" flood-opacity="0.22"/>
+            </filter>
+          </defs>
+          <rect width="2560" height="1600" fill="#272729"/>
+          <g filter="url(#sombra)">
+            <g transform="translate(1065 330) scale(0.83984375)">
           @LOGO@
+            </g>
           </g>
-          <text x="1280" y="1090" text-anchor="middle" font-family="DejaVu Sans" font-weight="bold" font-size="140" fill="#F3E6D3">Dartz<tspan fill="#E9A85A">OS</tspan></text>
-          <text x="1280" y="1160" text-anchor="middle" font-family="DejaVu Sans" font-size="44" fill="#8E97B5">guau.</text>
+          <text x="1280" y="930" text-anchor="middle" font-family="Inter, DejaVu Sans" font-weight="600" font-size="112" fill="#ffffff" letter-spacing="-2.2">DartzOS</text>
+          <text x="1280" y="1010" text-anchor="middle" font-family="Inter, DejaVu Sans" font-weight="400" font-size="56" fill="#cccccc" letter-spacing="0.4">Tu sistema. En tu bolsillo.</text>
           </svg>
           DZ_FIN
           mkdir -p "$(dirname "/tmp/grub.svg")"
           cat > "/tmp/grub.svg" <<'DZ_FIN'
           <svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480">
           <defs><radialGradient id="bg" cx="50%" cy="40%" r="75%"><stop offset="0%" stop-color="#2A3350"/><stop offset="100%" stop-color="#0E1020"/></radialGradient></defs>
-          <rect width="640" height="480" fill="url(#bg)"/>
+          <rect width="640" height="480" fill="#000000"/>
           <g transform="translate(205 60) scale(0.44921875)">
           @LOGO@
           </g>
-          <text x="320" y="345" text-anchor="middle" font-family="DejaVu Sans" font-weight="bold" font-size="50" fill="#F3E6D3">Dartz<tspan fill="#E9A85A">OS</tspan></text>
+          <text x="320" y="345" text-anchor="middle" font-family="DejaVu Sans" font-weight="bold" font-size="50" fill="#ffffff">DartzOS</text>
           </svg>
           DZ_FIN
 
@@ -764,7 +886,7 @@ jobs:
           rsvg-convert -w 128 "$LOGO" -o "$D/icono-128.png"
           rsvg-convert -w 400 "$LOGO" -o "$P/logo.png"
           rsvg-convert /tmp/fondo.svg -o "$D/fondo.png"
-          convert -size 240x6 xc:'#E9A85A' "$P/barra.png"
+          convert -size 240x6 xc:'#f5f5f7' "$P/barra.png"
           chmod +x config/hooks/normal/*.hook.chroot config/includes.chroot/usr/local/bin/* config/includes.chroot/usr/local/sbin/*
 
           if [ -d /usr/share/live/build/bootloaders/grub-pc ]; then
