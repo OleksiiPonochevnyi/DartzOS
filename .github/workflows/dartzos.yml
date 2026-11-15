@@ -1,5 +1,5 @@
 # ===================================================
-#   DartzOS 1.3 "Guau" - se construye solo en GitHub
+#   DartzOS 1.4 "Guau" - se construye solo en GitHub
 # ===================================================
 name: Construir DartzOS
 
@@ -51,16 +51,16 @@ jobs:
           echo ">>> Poniendo nombre: DartzOS"
           rm -f /etc/os-release
           cat > /etc/os-release <<'EOF'
-          PRETTY_NAME="DartzOS 1.3 (Guau)"
+          PRETTY_NAME="DartzOS 1.4 (Guau)"
           NAME="DartzOS"
-          VERSION_ID="1.3"
-          VERSION="1.3 (Guau)"
+          VERSION_ID="1.4"
+          VERSION="1.4 (Guau)"
           VERSION_CODENAME=trixie
           ID=debian
           HOME_URL="https://www.debian.org/"
           EOF
-          printf 'DartzOS 1.3 (Guau) \\n \\l\n\n' > /etc/issue
-          echo "DartzOS 1.3 (Guau)" > /etc/issue.net
+          printf 'DartzOS 1.4 (Guau) \\n \\l\n\n' > /etc/issue
+          echo "DartzOS 1.4 (Guau)" > /etc/issue.net
 
           echo ">>> Icono del perrito"
           mkdir -p /usr/share/icons/hicolor/128x128/apps /usr/share/icons/hicolor/scalable/apps
@@ -156,11 +156,11 @@ jobs:
           position-categories-alternate=true
           menu-width=520
           menu-height=560
-          favorites=firefox-esr.desktop,xfce4-terminal.desktop,thunar.desktop,dartz-ayuda.desktop,dartz-forrest.desktop,xfce4-settings-manager.desktop
+          favorites=google-chrome.desktop,firefox-esr.desktop,thunar.desktop,xfce4-terminal.desktop,dartz-cafe.desktop,dartz-ayuda.desktop,dartz-forrest.desktop,xfce4-settings-manager.desktop
           EOX
           cat > /etc/skel/.config/xfce4/panel/docklike-20.rc <<'EOX'
           [user]
-          pinned=/usr/share/applications/thunar.desktop;/usr/share/applications/firefox-esr.desktop;/usr/share/applications/xfce4-terminal.desktop;/usr/share/applications/mousepad.desktop;/usr/share/applications/xfce4-settings-manager.desktop;/usr/share/applications/dartz-ayuda.desktop;
+          pinned=/usr/share/applications/thunar.desktop;/usr/share/applications/google-chrome.desktop;/usr/share/applications/firefox-esr.desktop;/usr/share/applications/xfce4-terminal.desktop;/usr/share/applications/mousepad.desktop;/usr/share/applications/xfce4-settings-manager.desktop;/usr/share/applications/dartz-ayuda.desktop;
           indicatorStyle=2
           indicatorOrientation=0
           EOX
@@ -237,6 +237,23 @@ jobs:
           mkdir -p /etc/skel/.icons/default
           printf '[Icon Theme]\nInherits=%s\n' "$CURSOR" > /etc/skel/.icons/default/index.theme
 
+          echo ">>> Pantalla de inicio de sesion (con tu usuario y contrasena)"
+          cat > /etc/lightdm/lightdm-gtk-greeter.conf <<EOX
+          [greeter]
+          background=/usr/share/backgrounds/dartzos/fondo.png
+          user-background=false
+          theme-name=$TEMA
+          icon-theme-name=$ICONOS
+          cursor-theme-name=$CURSOR
+          font-name=Inter 11
+          xft-antialias=true
+          xft-hintstyle=hintslight
+          indicators=~host;~spacer;~clock;~spacer;~session;~power
+          clock-format=%a %-d %b  %H:%M
+          default-user-image=/usr/share/dartzos/icono-128.png
+          hide-user-image=false
+          EOX
+
           echo ">>> Estilo Apple: un solo color de accion (azul), terminal y fuentes"
           mkdir -p /etc/skel/.config/gtk-3.0 /etc/skel/.config/gtk-4.0
           cat > /etc/skel/.config/gtk-3.0/gtk.css <<'EOX'
@@ -295,7 +312,7 @@ jobs:
           systemctl enable mbpfan 2>/dev/null || true
 
           echo ">>> Permisos y memoria automática del USB"
-          chmod +x /usr/local/bin/ayuda /usr/local/bin/dartz-fondo /usr/local/bin/dartz-instalar /usr/local/sbin/dartz-memoria-auto 2>/dev/null || true
+          chmod +x /usr/local/bin/* /usr/local/sbin/* 2>/dev/null || true
           systemctl enable dartz-memoria.service
 
           echo ">>> DartzOS listo 🐶"
@@ -341,11 +358,24 @@ jobs:
             echo "Escribe  ayuda  para ver los comandos chulos de DartzOS 🐶"
           fi
           DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/etc/lightdm/lightdm.conf.d/50-dartzos-pantalla.conf")"
+          cat > "config/includes.chroot/etc/lightdm/lightdm.conf.d/50-dartzos-pantalla.conf" <<'DZ_FIN'
+          [Seat:*]
+          display-setup-script=/usr/local/sbin/dartz-pantalla-login
+          DZ_FIN
           mkdir -p "$(dirname "config/includes.chroot/etc/modprobe.d/brcmfmac.conf")"
           cat > "config/includes.chroot/etc/modprobe.d/brcmfmac.conf" <<'DZ_FIN'
           # WiFi Broadcom BCM43602 del MacBook Pro 2015.
           # Desactiva funciones que a veces impiden conectarse a redes WPA2.
           options brcmfmac feature_disable=0x82000
+          DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/etc/systemd/logind.conf.d/dartzos.conf")"
+          cat > "config/includes.chroot/etc/systemd/logind.conf.d/dartzos.conf" <<'DZ_FIN'
+          # Al cerrar la tapa: dormir (no apagar ni reiniciar). Al abrir pide la contraseña.
+          [Login]
+          HandleLidSwitch=suspend
+          HandleLidSwitchExternalPower=suspend
+          HandleLidSwitchDocked=ignore
           DZ_FIN
           mkdir -p "$(dirname "config/includes.chroot/etc/systemd/system/dartz-memoria.service")"
           cat > "config/includes.chroot/etc/systemd/system/dartz-memoria.service" <<'DZ_FIN'
@@ -368,6 +398,25 @@ jobs:
           # Cambia a la pantalla del escritorio en cuanto arranca (antes se quedaba en negro)
           [Service]
           ExecStartPost=-/bin/sh -c 'sleep 3; chvt 7'
+          DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/etc/xdg/autostart/dartz-bienvenida.desktop")"
+          cat > "config/includes.chroot/etc/xdg/autostart/dartz-bienvenida.desktop" <<'DZ_FIN'
+          [Desktop Entry]
+          Type=Application
+          Name=Bienvenida de DartzOS
+          Exec=/usr/local/bin/dartz-bienvenida
+          OnlyShowIn=XFCE;
+          NoDisplay=true
+          DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/etc/xdg/autostart/dartz-escala.desktop")"
+          cat > "config/includes.chroot/etc/xdg/autostart/dartz-escala.desktop" <<'DZ_FIN'
+          [Desktop Entry]
+          Type=Application
+          Name=Tamaño de pantalla de DartzOS
+          Exec=/usr/local/bin/dartz-escala
+          OnlyShowIn=XFCE;
+          NoDisplay=true
+          X-XFCE-Autostart-Override=true
           DZ_FIN
           mkdir -p "$(dirname "config/includes.chroot/etc/xdg/autostart/dartz-fondo.desktop")"
           cat > "config/includes.chroot/etc/xdg/autostart/dartz-fondo.desktop" <<'DZ_FIN'
@@ -405,6 +454,14 @@ jobs:
             marcianos      Space Invaders
             luna           Coche lunar saltando cráteres
 
+            ☕  COMO EN EL MAC
+            ─────────────────────────────────────────────
+            caffeinate     No dormir hasta Ctrl+C (también: caffeinate -t 600)
+            ⌘ + espacio    Buscar apps (como Spotlight)
+            ⌘ + ⇧ + 3 / 4  Captura de pantalla entera / de una zona
+            ⌘ + Q          Cerrar ventana       ⌘ + T  Terminal
+            Cerrar la tapa Duerme y al abrir pide tu contraseña
+
             🛠  ÚTILES
             ─────────────────────────────────────────────
             htop           Ver qué programas usan el ordenador (q para salir)
@@ -416,11 +473,139 @@ jobs:
             Truco: Ctrl+C para parar cualquier cosa. Escribe 'clear' para limpiar.
           EOF
           DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/usr/local/bin/caffeinate")"
+          cat > "config/includes.chroot/usr/local/bin/caffeinate" <<'DZ_FIN'
+          #!/bin/bash
+          # caffeinate (como en macOS): evita que el ordenador se duerma.
+          #   caffeinate            -> despierto hasta que pulses Ctrl+C
+          #   caffeinate -t 600     -> despierto 600 segundos
+          #   caffeinate comando    -> despierto mientras dure el comando
+          W="idle:sleep:handle-lid-switch"
+          if [ "$1" = "-t" ] && [ -n "$2" ]; then
+            echo "☕ Despierto durante $2 segundos (Ctrl+C para parar)"
+            exec systemd-inhibit --what=$W --who=caffeinate --why="caffeinate -t $2" sleep "$2"
+          elif [ $# -gt 0 ]; then
+            exec systemd-inhibit --what=$W --who=caffeinate --why="$*" "$@"
+          else
+            echo "☕ DartzOS no se dormirá (ni al cerrar la tapa) hasta que pulses Ctrl+C"
+            exec systemd-inhibit --what=$W --who=caffeinate --why="caffeinate" sleep infinity
+          fi
+          DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/usr/local/bin/dartz-bienvenida")"
+          cat > "config/includes.chroot/usr/local/bin/dartz-bienvenida" <<'DZ_FIN'
+          #!/bin/bash
+          # Asistente de bienvenida de DartzOS: crea tu usuario (y opcionalmente instala Google Chrome).
+          # Solo se ejecuta en el usuario interno "dartz" del USB y solo hasta que creas tu usuario.
+          MARCA=/var/lib/dartzos/usuario-creado
+          [ -d /run/live ] || exit 0
+          [ "$(id -un)" = "dartz" ] || exit 0
+
+          sin_autologin() {
+            sudo sed -i -E 's/^(autologin-user|autologin-user-timeout|autologin-session)=/#&/' /etc/lightdm/lightdm.conf 2>/dev/null
+            sudo grep -rl '^autologin-user' /etc/lightdm/lightdm.conf.d 2>/dev/null | xargs -r sudo sed -i -E 's/^(autologin-user)/#\1/'
+            printf '[Seat:*]\ngreeter-hide-users=false\nuser-session=xfce\n' | sudo tee /etc/lightdm/lightdm.conf.d/90-dartzos.conf >/dev/null
+          }
+          # Si ya creaste tu usuario y aun asi entra solo "dartz", volvemos a la pantalla de contrasena
+          if [ -f "$MARCA" ]; then sin_autologin; sudo systemctl restart lightdm; exit 0; fi
+          sleep 5
+          T="Bienvenido a DartzOS"
+          zenity --info --title="$T" --width=460 --ok-label="Empezar" \
+            --text="<big><b>¡Hola! 🐶</b></big>\n\nVamos a preparar DartzOS para ti:\n\n  1. Crear tu usuario y tu contraseña\n  2. Instalar Google Chrome (si tienes internet)\n\nTodo se guarda en el USB." || exit 0
+
+          while true; do
+            DATOS=$(zenity --forms --title="Crea tu usuario" --width=460 --separator="|" \
+              --text="Con esto entrarás en DartzOS cada vez que lo enciendas." \
+              --add-entry="Tu nombre" --add-entry="Usuario (minúsculas, sin espacios)" \
+              --add-password="Contraseña" --add-password="Repite la contraseña") || exit 0
+            IFS='|' read -r NOMBRE USUARIO P1 P2 <<< "$DATOS"
+            USUARIO=$(printf '%s' "$USUARIO" | tr 'A-Z' 'a-z')
+            if ! [[ "$USUARIO" =~ ^[a-z][a-z0-9_-]{1,30}$ ]]; then
+              zenity --error --width=400 --text="El usuario solo puede tener letras minúsculas, números, - y _, y tiene que empezar por una letra."; continue; fi
+            if [ "$USUARIO" = dartz ] || [ "$USUARIO" = root ] || id "$USUARIO" >/dev/null 2>&1; then
+              zenity --error --width=400 --text="Ese usuario no se puede usar. Elige otro."; continue; fi
+            if [ ${#P1} -lt 4 ]; then zenity --error --width=400 --text="La contraseña tiene que tener al menos 4 caracteres."; continue; fi
+            if [ "$P1" != "$P2" ]; then zenity --error --width=400 --text="Las contraseñas no coinciden."; continue; fi
+            [ -z "$NOMBRE" ] && NOMBRE="$USUARIO"
+            break
+          done
+
+          (
+          echo "10"; echo "# Creando tu usuario..."
+          sudo useradd -m -s /bin/bash -c "$NOMBRE" "$USUARIO"
+          printf '%s:%s\n' "$USUARIO" "$P1" | sudo chpasswd
+          for g in sudo audio video plugdev netdev bluetooth lpadmin scanner users input; do
+            getent group $g >/dev/null && sudo usermod -aG $g "$USUARIO"
+          done
+          # Que las redes WiFi guardadas sirvan para todos los usuarios
+          sudo sed -i '/^permissions=/d' /etc/NetworkManager/system-connections/*.nmconnection 2>/dev/null
+          echo "60"; echo "# Activando el inicio con contraseña..."
+          sin_autologin
+          sudo mkdir -p /var/lib/AccountsService/users /var/lib/AccountsService/icons
+          printf '[User]\nSystemAccount=true\n' | sudo tee /var/lib/AccountsService/users/dartz >/dev/null
+          sudo cp /usr/share/dartzos/icono-128.png "/var/lib/AccountsService/icons/$USUARIO"
+          printf '[User]\nIcon=/var/lib/AccountsService/icons/%s\n' "$USUARIO" | sudo tee "/var/lib/AccountsService/users/$USUARIO" >/dev/null
+          echo "100"
+          ) | zenity --progress --title="$T" --width=420 --auto-close --no-cancel
+
+          if zenity --question --title="Google Chrome" --width=440 --ok-label="Instalar Chrome" --cancel-label="Más tarde" \
+             --text="¿Quieres instalar <b>Google Chrome</b> ahora?\n\nNecesitas internet: conéctate al WiFi (arriba a la derecha) antes de pulsar Instalar.\n\nSi no, puedes hacerlo luego desde el menú → <i>Instalar Google Chrome</i>."; then
+            sudo /usr/local/sbin/dartz-instalar-chrome "$USUARIO" | zenity --progress --pulsate --title="Instalando Google Chrome" --width=420 --auto-close --no-cancel \
+              --text="Descargando Chrome... (puede tardar unos minutos)"
+            if command -v google-chrome >/dev/null; then
+              zenity --info --width=380 --text="✅ Google Chrome instalado."
+            else
+              zenity --warning --width=420 --text="No se pudo instalar Chrome (¿hay internet?).\nPrueba luego desde el menú → Instalar Google Chrome."
+            fi
+          fi
+
+          sudo mkdir -p /var/lib/dartzos && sudo touch "$MARCA"
+          sudo passwd -l dartz >/dev/null 2>&1
+          zenity --info --title="$T" --width=440 --ok-label="Entrar" \
+            --text="<big><b>¡Listo, $NOMBRE! 🎉</b></big>\n\nA partir de ahora DartzOS te pedirá tu contraseña al encender y al abrir la tapa.\n\nAhora se cerrará esta sesión y entrarás con tu usuario."
+          sudo systemctl restart lightdm
+          DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/usr/local/bin/dartz-cafe")"
+          cat > "config/includes.chroot/usr/local/bin/dartz-cafe" <<'DZ_FIN'
+          #!/bin/bash
+          # Interruptor de "café": activa o desactiva que el ordenador no se duerma
+          PID="$XDG_RUNTIME_DIR/dartz-cafe.pid"
+          if [ -f "$PID" ] && kill -0 "$(cat "$PID")" 2>/dev/null; then
+            kill "$(cat "$PID")"; rm -f "$PID"
+            notify-send -i dartzos "Café apagado" "DartzOS volverá a dormirse normalmente."
+          else
+            systemd-inhibit --what=idle:sleep:handle-lid-switch --who=DartzOS --why="Café" sleep infinity &
+            echo $! > "$PID"
+            notify-send -i dartzos "☕ Café encendido" "DartzOS no se dormirá, ni al cerrar la tapa. Vuelve a pulsar para apagarlo."
+          fi
+          DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/usr/local/bin/dartz-escala")"
+          cat > "config/includes.chroot/usr/local/bin/dartz-escala" <<'DZ_FIN'
+          #!/bin/bash
+          # Ajusta el tamaño de todo según la pantalla: x2 en pantallas Retina, x1 en el resto.
+          # Así DartzOS se ve bien en el MacBook y en cualquier otro ordenador.
+          sleep 1
+          L=$(xrandr --query 2>/dev/null | awk '/ connected/ && /[0-9]+mm x [0-9]+mm/ {for(i=1;i<=NF;i++){if($i ~ /^[0-9]+x[0-9]+\+/){split($i,a,"x"); w=a[1]} if($i ~ /mm$/ && !mm){mm=$i}} print w, mm+0; exit}')
+          PX=${L% *}; MM=${L#* }
+          ESCALA=1
+          if [ -n "$PX" ] && [ -n "$MM" ] && [ "$MM" -gt 0 ]; then
+            DPI=$(( PX * 254 / (MM * 10) ))
+            [ "$DPI" -gt 170 ] && ESCALA=2
+          fi
+          xfconf-query -c xsettings -p /Gdk/WindowScalingFactor -n -t int -s $ESCALA
+          xfconf-query -c xsettings -p /Gtk/CursorThemeSize -n -t int -s $((24*ESCALA))
+          T=$(xfconf-query -c xfwm4 -p /general/theme 2>/dev/null)
+          B=${T%-xhdpi}; B=${B%-hdpi}
+          if [ $ESCALA = 2 ]; then
+            for v in "$B-xhdpi" "$B-hdpi" Default-xhdpi; do [ -d "/usr/share/themes/$v/xfwm4" ] && { xfconf-query -c xfwm4 -p /general/theme -s "$v"; break; }; done
+          else
+            [ -d "/usr/share/themes/$B/xfwm4" ] && xfconf-query -c xfwm4 -p /general/theme -s "$B" || xfconf-query -c xfwm4 -p /general/theme -s Default
+          fi
+          DZ_FIN
           mkdir -p "$(dirname "config/includes.chroot/usr/local/bin/dartz-fondo")"
           cat > "config/includes.chroot/usr/local/bin/dartz-fondo" <<'DZ_FIN'
           #!/bin/bash
-          # Pone el fondo del perrito en todas las pantallas (solo la primera vez)
-          MARCA="$HOME/.config/dartzos-fondo-puesto"
+          # Primera vez de cada usuario: fondo de pantalla y atajos de teclado tipo Mac
+          MARCA="$HOME/.config/dartzos-preparado"
           [ -f "$MARCA" ] && exit 0
           sleep 3
           FONDO=/usr/share/backgrounds/dartzos/fondo.png
@@ -431,6 +616,17 @@ jobs:
           for P in $(xfconf-query -c xfce4-desktop -l 2>/dev/null | grep last-image); do
             xfconf-query -c xfce4-desktop -p "$P" -s "$FONDO"
           done
+          # Atajos como en el Mac (la tecla ⌘ es "Super")
+          K="xfconf-query -c xfce4-keyboard-shortcuts -n -t string"
+          $K -p "/commands/custom/<Super>space" -s "xfce4-popup-whiskermenu"
+          $K -p "/commands/custom/<Shift><Super>3" -s "xfce4-screenshooter -f -s $HOME"
+          $K -p "/commands/custom/<Shift><Super>4" -s "xfce4-screenshooter -r -s $HOME"
+          $K -p "/commands/custom/<Super>t" -s "xfce4-terminal"
+          $K -p "/commands/custom/<Super>e" -s "thunar"
+          $K -p "/commands/custom/<Primary><Super>q" -s "xflock4"
+          $K -p "/xfwm4/custom/<Super>q" -s "close_window_key"
+          $K -p "/xfwm4/custom/<Super>m" -s "hide_window_key"
+          $K -p "/xfwm4/custom/<Super>Tab" -s "cycle_windows_key"
           mkdir -p "$HOME/.config" && touch "$MARCA"
           DZ_FIN
           mkdir -p "$(dirname "config/includes.chroot/usr/local/bin/dartz-instalar")"
@@ -443,6 +639,27 @@ jobs:
             exit 1
           fi
           exec sudo -E sh -c "mkdir -p /run/dartzos && ln -sf '$SQ' /run/dartzos/filesystem.squashfs && calamares"
+          DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/usr/local/sbin/dartz-instalar-chrome")"
+          cat > "config/includes.chroot/usr/local/sbin/dartz-instalar-chrome" <<'DZ_FIN'
+          #!/bin/bash
+          # Descarga Google Chrome de la web oficial de Google y lo pone como navegador por defecto.
+          # Uso: sudo dartz-instalar-chrome [usuario]
+          set -e
+          U="${1:-$SUDO_USER}"
+          T=$(mktemp -d)
+          curl -fL --retry 3 -o "$T/chrome.deb" https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          apt-get install -y "$T/chrome.deb"
+          rm -rf "$T"
+          update-alternatives --set x-www-browser /usr/bin/google-chrome-stable 2>/dev/null || true
+          if [ -n "$U" ] && [ -d "/home/$U" ]; then
+            H="/home/$U"
+            mkdir -p "$H/.config/xfce4"
+            printf 'WebBrowser=google-chrome\n' > "$H/.config/xfce4/helpers.rc"
+            printf '[Default Applications]\nx-scheme-handler/http=google-chrome.desktop\nx-scheme-handler/https=google-chrome.desktop\ntext/html=google-chrome.desktop\n' > "$H/.config/mimeapps.list"
+            chown -R "$U:$U" "$H/.config"
+          fi
+          echo "Chrome instalado"
           DZ_FIN
           mkdir -p "$(dirname "config/includes.chroot/usr/local/sbin/dartz-memoria-auto")"
           cat > "config/includes.chroot/usr/local/sbin/dartz-memoria-auto" <<'DZ_FIN'
@@ -501,6 +718,18 @@ jobs:
           sleep 4
           systemctl reboot
           DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/usr/local/sbin/dartz-pantalla-login")"
+          cat > "config/includes.chroot/usr/local/sbin/dartz-pantalla-login" <<'DZ_FIN'
+          #!/bin/sh
+          # Pantalla de inicio de sesión: letra grande en pantallas Retina
+          L=$(xrandr --query 2>/dev/null | awk '/ connected/ && /[0-9]+mm x [0-9]+mm/ {for(i=1;i<=NF;i++){if($i ~ /^[0-9]+x[0-9]+\+/){split($i,a,"x"); w=a[1]} if($i ~ /mm$/ && !mm){mm=$i}} print w, mm+0; exit}')
+          PX=${L% *}; MM=${L#* }
+          if [ -n "$MM" ] && [ "$MM" -gt 0 ] && [ $(( PX * 254 / (MM * 10) )) -gt 170 ]; then
+            echo "Xft.dpi: 192" | xrdb -merge
+            echo "Xcursor.size: 48" | xrdb -merge
+          fi
+          exit 0
+          DZ_FIN
           mkdir -p "$(dirname "config/includes.chroot/usr/share/applications/dartz-ayuda.desktop")"
           cat > "config/includes.chroot/usr/share/applications/dartz-ayuda.desktop" <<'DZ_FIN'
           [Desktop Entry]
@@ -510,6 +739,26 @@ jobs:
           Exec=xfce4-terminal --hold --title=Ayuda -x ayuda
           Icon=dartzos
           Categories=System;
+          DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/usr/share/applications/dartz-cafe.desktop")"
+          cat > "config/includes.chroot/usr/share/applications/dartz-cafe.desktop" <<'DZ_FIN'
+          [Desktop Entry]
+          Type=Application
+          Name=Café (no dormir)
+          Comment=Activa o desactiva que el ordenador no se duerma, como caffeinate en macOS
+          Exec=/usr/local/bin/dartz-cafe
+          Icon=preferences-desktop-screensaver
+          Categories=Utility;
+          DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/usr/share/applications/dartz-chrome.desktop")"
+          cat > "config/includes.chroot/usr/share/applications/dartz-chrome.desktop" <<'DZ_FIN'
+          [Desktop Entry]
+          Type=Application
+          Name=Instalar Google Chrome
+          Comment=Descarga Google Chrome de la web de Google
+          Exec=xfce4-terminal --hold --title="Instalar Chrome" -x sudo /usr/local/sbin/dartz-instalar-chrome
+          Icon=web-browser
+          Categories=Network;
           DZ_FIN
           mkdir -p "$(dirname "config/includes.chroot/usr/share/applications/dartz-forrest.desktop")"
           cat > "config/includes.chroot/usr/share/applications/dartz-forrest.desktop" <<'DZ_FIN'
@@ -677,6 +926,12 @@ jobs:
           # Instalador para ponerlo en el disco de cualquier ordenador
           calamares
           calamares-settings-debian
+
+          # Usuarios, bloqueo al cerrar la tapa y avisos
+          zenity
+          libnotify-bin
+          light-locker
+          accountsservice
           DZ_FIN
           mkdir -p "$(dirname "config/includes.chroot/etc/skel/.config/fastfetch/config.jsonc")"
           cat > "config/includes.chroot/etc/skel/.config/fastfetch/config.jsonc" <<'DZ_FIN'
@@ -717,6 +972,21 @@ jobs:
                 <property name="show-removable" type="bool" value="false"/>
                 <property name="show-filesystem" type="bool" value="false"/>
               </property>
+            </property>
+          </channel>
+          DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-power-manager.xml")"
+          cat > "config/includes.chroot/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-power-manager.xml" <<'DZ_FIN'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <channel name="xfce4-power-manager" version="1.0">
+            <property name="xfce4-power-manager" type="empty">
+              <property name="logind-handle-lid-switch" type="bool" value="true"/>
+              <property name="lock-screen-suspend-hibernate" type="bool" value="true"/>
+              <property name="lid-action-on-battery" type="uint" value="1"/>
+              <property name="lid-action-on-ac" type="uint" value="1"/>
+              <property name="inactivity-sleep-mode-on-battery" type="uint" value="1"/>
+              <property name="inactivity-on-battery" type="uint" value="20"/>
+              <property name="show-tray-icon" type="bool" value="false"/>
             </property>
           </channel>
           DZ_FIN
@@ -840,20 +1110,34 @@ jobs:
           mkdir -p "$(dirname "/tmp/fondo.svg")"
           cat > "/tmp/fondo.svg" <<'DZ_FIN'
           <svg xmlns="http://www.w3.org/2000/svg" width="2560" height="1600" viewBox="0 0 2560 1600">
-          <!-- Estilo "tile oscuro": color plano, sin degradados; la unica sombra es la del "producto" (el perrito) -->
           <defs>
+            <linearGradient id="cielo" x1="0" y1="0" x2="0.25" y2="1">
+              <stop offset="0" stop-color="#060B1E"/><stop offset="0.6" stop-color="#0C1C44"/><stop offset="1" stop-color="#12306B"/>
+            </linearGradient>
+            <linearGradient id="ola1" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stop-color="#173A8C"/><stop offset="1" stop-color="#2563EB"/>
+            </linearGradient>
+            <linearGradient id="ola2" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stop-color="#1D6FE0"/><stop offset="0.6" stop-color="#2FA8F0"/><stop offset="1" stop-color="#5BC8F5"/>
+            </linearGradient>
+            <linearGradient id="ola3" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stop-color="#9FDBFA"/><stop offset="0.5" stop-color="#E3F4FF"/><stop offset="1" stop-color="#FFFFFF"/>
+            </linearGradient>
             <filter id="sombra" x="-30%" y="-30%" width="160%" height="160%">
-              <feDropShadow dx="6" dy="10" stdDeviation="30" flood-color="#000000" flood-opacity="0.22"/>
+              <feDropShadow dx="6" dy="10" stdDeviation="30" flood-color="#000000" flood-opacity="0.25"/>
             </filter>
           </defs>
-          <rect width="2560" height="1600" fill="#272729"/>
+          <rect width="2560" height="1600" fill="url(#cielo)"/>
+          <path d="M-300 1080 C 420 930 820 1180 1280 1060 S 2140 860 2900 1000 L2900 1900 L-300 1900 Z" fill="url(#ola1)" opacity="0.9"/>
+          <path d="M-300 1200 C 520 1060 900 1320 1400 1200 S 2200 1040 2900 1150 L2900 1900 L-300 1900 Z" fill="url(#ola2)" opacity="0.92"/>
+          <path d="M-300 1360 C 600 1240 1000 1460 1500 1360 S 2250 1230 2900 1320 L2900 1900 L-300 1900 Z" fill="url(#ola3)" opacity="0.95"/>
           <g filter="url(#sombra)">
-            <g transform="translate(1065 330) scale(0.83984375)">
+            <g transform="translate(1065 250) scale(0.83984375)">
           @LOGO@
             </g>
           </g>
-          <text x="1280" y="930" text-anchor="middle" font-family="Inter, DejaVu Sans" font-weight="600" font-size="112" fill="#ffffff" letter-spacing="-2.2">DartzOS</text>
-          <text x="1280" y="1010" text-anchor="middle" font-family="Inter, DejaVu Sans" font-weight="400" font-size="56" fill="#cccccc" letter-spacing="0.4">Tu sistema. En tu bolsillo.</text>
+          <text x="1280" y="850" text-anchor="middle" font-family="Inter, DejaVu Sans" font-weight="600" font-size="112" fill="#ffffff" letter-spacing="-2.2">DartzOS</text>
+          <text x="1280" y="930" text-anchor="middle" font-family="Inter, DejaVu Sans" font-weight="400" font-size="56" fill="#cfe6ff" letter-spacing="0.4">Tu sistema. En tu bolsillo.</text>
           </svg>
           DZ_FIN
           mkdir -p "$(dirname "/tmp/grub.svg")"
@@ -866,6 +1150,60 @@ jobs:
           </g>
           <text x="320" y="345" text-anchor="middle" font-family="DejaVu Sans" font-weight="bold" font-size="50" fill="#ffffff">DartzOS</text>
           </svg>
+          DZ_FIN
+          mkdir -p "$(dirname "/tmp/fondos.py")"
+          cat > "/tmp/fondos.py" <<'DZ_FIN'
+          #!/usr/bin/env python3
+          # Genera los fondos de pantalla de DartzOS (luna, montanas, bosque, oceano, aurora)
+          import random, math, sys, os
+          OUT = sys.argv[1]; os.makedirs(OUT, exist_ok=True)
+          W,H=2560,1600
+          def stars(n,seed,ymax=1100,op=0.9):
+              r=random.Random(seed); out=[]
+              for _ in range(n):
+                  x=r.uniform(0,W); y=r.uniform(0,ymax); s=r.choice([1.2,1.6,2.2,2.8,3.4]); o=r.uniform(0.3,op)
+                  out.append('<circle cx="%.0f" cy="%.0f" r="%s" fill="#fff" opacity="%.2f"/>'%(x,y,s,o))
+              return "".join(out)
+          def ridge(seed,base,amp,step=80,rough=0.5):
+              r=random.Random(seed); pts=[]
+              for x in range(-100,W+200,step):
+                  y=base+amp*math.sin(x/430+seed)+r.uniform(-amp*rough,amp*rough); pts.append("%d,%.0f"%(x,y))
+              return "M-100,1700 L"+" L".join(pts)+" L%d,1700 Z"%(W+200)
+          def lg(id,stops):
+              return '<linearGradient id="%s" x1="0" y1="0" x2="0" y2="1">%s</linearGradient>'%(id,"".join('<stop offset="%s" stop-color="%s"/>'%(o,c) for o,c in stops))
+          def svg(name,defs,body):
+              open(os.path.join(OUT,name+".svg"),"w").write('<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d"><defs>%s<radialGradient id="glow"><stop offset="0" stop-color="#fff" stop-opacity="0.35"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient></defs>%s</svg>'%(W,H,W,H,defs,body))
+          R='<rect width="%d" height="%d" fill="url(#c)"/>'%(W,H)
+          # Luna
+          b=R+stars(420,1)+'<circle cx="1820" cy="430" r="420" fill="url(#glow)"/><circle cx="1820" cy="430" r="190" fill="#f4f1e6"/><circle cx="1760" cy="380" r="34" fill="#e2ddcc"/><circle cx="1880" cy="500" r="48" fill="#e5e0cf"/><circle cx="1870" cy="360" r="20" fill="#e2ddcc"/><circle cx="1745" cy="500" r="16" fill="#e2ddcc"/>'
+          b+='<path d="%s" fill="#14274a"/><path d="%s" fill="#0c1a33"/><path d="%s" fill="#060e1f"/>'%(ridge(3,1150,90,90,0.4),ridge(5,1300,70,70,0.5),ridge(8,1450,50,60,0.6))
+          svg("luna",lg("c",[(0,"#050816"),(0.6,"#0d1b3d"),(1,"#1e3a6b")]),b)
+          # Montanas
+          b=R+'<circle cx="1280" cy="1020" r="520" fill="url(#glow)"/><circle cx="1280" cy="1020" r="170" fill="#ffe3b3"/>'
+          for i,c in enumerate(["#a8487a","#7d3a72","#552b62","#36204d","#1d1433"]):
+              b+='<path d="%s" fill="%s"/>'%(ridge(10+i,820+i*150,140-i*18,110-i*10,0.35),c)
+          svg("montanas",lg("c",[(0,"#2b1b5a"),(0.45,"#c4507a"),(0.75,"#f39a6b"),(1,"#ffd59e")]),b)
+          # Bosque
+          b=R; r=random.Random(7)
+          for col,base,sc in [("#6f9693",1000,0.9),("#4f7a74",1150,1.0),("#335c55",1300,1.15),("#1d3b35",1460,1.35)]:
+              b+='<rect x="0" y="%d" width="%d" height="%d" fill="%s"/>'%(base,W,H-base,col); x=-60
+              while x<W+60:
+                  h=r.uniform(260,460)*sc; w=h*0.38
+                  b+='<path d="M%.0f,%d L%.0f,%.0f L%.0f,%d Z" fill="%s"/>'%(x,base+20,x+w/2,base-h,x+w,base+20,col); x+=w*r.uniform(0.45,0.8)
+          svg("bosque",lg("c",[(0,"#cfe3e8"),(1,"#7fa7a6")]),b)
+          # Oceano
+          b=R+'<circle cx="600" cy="420" r="300" fill="url(#glow)"/><circle cx="600" cy="420" r="110" fill="#fffbe8"/><rect x="0" y="900" width="%d" height="700" fill="#0a3d73"/>'%W
+          for i,(col,yy,a) in enumerate([("#2aa3e0",930,26),("#1c7fc2",1050,34),("#155f9c",1200,42),("#0d4278",1380,50)]):
+              b+='<path d="M-50,1700 L%s L%d,1700 Z" fill="%s"/>'%(" L".join("%d,%.0f"%(x,yy+a*math.sin(x/170+i)) for x in range(-50,W+60,40)),W+60,col)
+          svg("oceano",lg("c",[(0,"#8fd3f4"),(0.55,"#d9f2fb"),(1,"#ffffff")]),b)
+          # Aurora (azules y violeta, sin verde)
+          b=R+stars(300,11,900,0.8)
+          for i,(col,op) in enumerate([("#38bdf8",0.35),("#6366f1",0.25),("#a78bfa",0.18)]):
+              pts=" ".join("%d,%.0f"%(x,420+i*90+160*math.sin(x/360+i*1.3)) for x in range(-100,W+200,60))
+              b+='<polyline points="%s" fill="none" stroke="%s" stroke-width="%d" stroke-linecap="round" opacity="%s"/>'%(pts,col,220-i*40,op)
+              b+='<polyline points="%s" fill="none" stroke="#fff" stroke-width="10" opacity="%.2f"/>'%(pts,op*0.6)
+          b+='<path d="%s" fill="#04101a"/><path d="%s" fill="#020910"/>'%(ridge(21,1250,60,90,0.5),ridge(22,1420,40,60,0.6))
+          svg("aurora",lg("c",[(0,"#020611"),(1,"#0b1d2b")]),b)
           DZ_FIN
 
           echo '🐶 Dibujando el perrito (logo, fondo, arranque)'
@@ -886,6 +1224,11 @@ jobs:
           rsvg-convert -w 128 "$LOGO" -o "$D/icono-128.png"
           rsvg-convert -w 400 "$LOGO" -o "$P/logo.png"
           rsvg-convert /tmp/fondo.svg -o "$D/fondo.png"
+          mkdir -p config/includes.chroot/usr/share/backgrounds/dartzos
+          python3 /tmp/fondos.py /tmp/fondos
+          for f in /tmp/fondos/*.svg; do
+            rsvg-convert "$f" -o "config/includes.chroot/usr/share/backgrounds/dartzos/$(basename "${f%.svg}").png"
+          done
           convert -size 240x6 xc:'#f5f5f7' "$P/barra.png"
           chmod +x config/hooks/normal/*.hook.chroot config/includes.chroot/usr/local/bin/* config/includes.chroot/usr/local/sbin/*
 
