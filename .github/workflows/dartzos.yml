@@ -1,5 +1,5 @@
 # ===================================================
-#   DartzOS 1.0 "Guau" - se construye solo en GitHub
+#   DartzOS 1.1 "Guau" - se construye solo en GitHub
 # ===================================================
 name: Construir DartzOS
 
@@ -39,7 +39,7 @@ jobs:
             --iso-application "DartzOS" \
             --iso-volume "DartzOS" \
             --iso-publisher "Alex" \
-            --bootappend-live "boot=live components quiet splash persistence username=dartz user-fullname=Dartz hostname=dartzos locales=es_ES.UTF-8 keyboard-layouts=es keyboard-variants=mac timezone=Europe/Madrid"
+            --bootappend-live "boot=live components quiet splash toram persistence username=dartz user-fullname=Dartz hostname=dartzos locales=es_ES.UTF-8 keyboard-layouts=es keyboard-variants=mac timezone=Europe/Madrid"
 
           echo '🐶 [3/5] Archivos de DartzOS'
           mkdir -p "$(dirname "config/hooks/normal/9000-dartzos.hook.chroot")"
@@ -51,16 +51,16 @@ jobs:
           echo ">>> Poniendo nombre: DartzOS"
           rm -f /etc/os-release
           cat > /etc/os-release <<'EOF'
-          PRETTY_NAME="DartzOS 1.0 (Guau)"
+          PRETTY_NAME="DartzOS 1.1 (Guau)"
           NAME="DartzOS"
-          VERSION_ID="1.0"
-          VERSION="1.0 (Guau)"
+          VERSION_ID="1.1"
+          VERSION="1.1 (Guau)"
           VERSION_CODENAME=trixie
           ID=debian
           HOME_URL="https://www.debian.org/"
           EOF
-          printf 'DartzOS 1.0 (Guau) \\n \\l\n\n' > /etc/issue
-          echo "DartzOS 1.0 (Guau)" > /etc/issue.net
+          printf 'DartzOS 1.1 (Guau) \\n \\l\n\n' > /etc/issue
+          echo "DartzOS 1.1 (Guau)" > /etc/issue.net
 
           echo ">>> Icono del perrito"
           mkdir -p /usr/share/icons/hicolor/128x128/apps /usr/share/icons/hicolor/scalable/apps
@@ -84,6 +84,81 @@ jobs:
             sed -i 's|value="applicationsmenu"/>|value="applicationsmenu"><property name="button-icon" type="string" value="dartzos"/><property name="button-title" type="string" value="DartzOS"/></property>|' "$XML/xfce4-panel.xml"
           fi
 
+
+          echo ">>> Aspecto tipo macOS: tema WhiteSur, iconos, cursor y letra Inter"
+          TEMA=Greybird-dark; ICONOS=elementary-xfce-dark; CURSOR=Adwaita; VENTANAS=Default-xhdpi
+          T=/tmp/whitesur; rm -rf $T; mkdir -p $T
+          if git clone --depth 1 https://github.com/vinceliuice/WhiteSur-gtk-theme.git $T/gtk >/dev/null 2>&1; then
+            (cd $T/gtk && ./install.sh -d /usr/share/themes -c dark) || true
+          fi
+          if git clone --depth 1 https://github.com/vinceliuice/WhiteSur-icon-theme.git $T/icons >/dev/null 2>&1; then
+            (cd $T/icons && ./install.sh -d /usr/share/icons -t default) || true
+          fi
+          if git clone --depth 1 https://github.com/vinceliuice/WhiteSur-cursors.git $T/cursors >/dev/null 2>&1; then
+            [ -d $T/cursors/dist ] && cp -r $T/cursors/dist /usr/share/icons/WhiteSur-cursors || true
+          fi
+          rm -rf $T
+          [ -d /usr/share/themes/WhiteSur-Dark ] && TEMA=WhiteSur-Dark
+          for v in WhiteSur-Dark-xhdpi WhiteSur-Dark-hdpi WhiteSur-Dark; do
+            [ -d /usr/share/themes/$v/xfwm4 ] && { VENTANAS=$v; break; }
+          done
+          [ -d /usr/share/icons/WhiteSur-dark ] && ICONOS=WhiteSur-dark
+          [ -d /usr/share/icons/WhiteSur-cursors ] && CURSOR=WhiteSur-cursors
+          echo "    tema=$TEMA ventanas=$VENTANAS iconos=$ICONOS cursor=$CURSOR"
+          gtk-update-icon-cache -f /usr/share/icons/$ICONOS 2>/dev/null || true
+
+          cat > "$XML/xsettings.xml" <<EOX
+          <?xml version="1.0" encoding="UTF-8"?>
+          <channel name="xsettings" version="1.0">
+            <property name="Net" type="empty">
+              <property name="ThemeName" type="string" value="$TEMA"/>
+              <property name="IconThemeName" type="string" value="$ICONOS"/>
+            </property>
+            <property name="Gdk" type="empty">
+              <property name="WindowScalingFactor" type="int" value="2"/>
+            </property>
+            <property name="Gtk" type="empty">
+              <property name="CursorThemeName" type="string" value="$CURSOR"/>
+              <property name="CursorThemeSize" type="int" value="48"/>
+              <property name="FontName" type="string" value="Inter 10"/>
+              <property name="MonospaceFontName" type="string" value="DejaVu Sans Mono 11"/>
+            </property>
+            <property name="Xft" type="empty">
+              <property name="Antialias" type="int" value="1"/>
+              <property name="HintStyle" type="string" value="hintslight"/>
+              <property name="RGBA" type="string" value="rgb"/>
+            </property>
+          </channel>
+          EOX
+          cat > "$XML/xfwm4.xml" <<EOX
+          <?xml version="1.0" encoding="UTF-8"?>
+          <channel name="xfwm4" version="1.0">
+            <property name="general" type="empty">
+              <property name="theme" type="string" value="$VENTANAS"/>
+              <property name="button_layout" type="string" value="CHM|"/>
+              <property name="title_alignment" type="string" value="center"/>
+              <property name="title_font" type="string" value="Inter Semi-Bold 10"/>
+              <property name="use_compositing" type="bool" value="false"/>
+            </property>
+          </channel>
+          EOX
+          mkdir -p /etc/skel/.icons/default
+          printf '[Icon Theme]\nInherits=%s\n' "$CURSOR" > /etc/skel/.icons/default/index.theme
+
+          echo ">>> Menos escrituras en el USB (para que vaya mas rapido)"
+          systemctl mask apt-daily.timer apt-daily-upgrade.timer man-db.timer e2scrub_all.timer 2>/dev/null || true
+
+          echo ">>> Instalador de DartzOS (Calamares)"
+          B=$(ls -d /etc/calamares/branding/* 2>/dev/null | head -1)
+          if [ -n "$B" ] && [ -f "$B/branding.desc" ]; then
+            sed -i -E 's/^(\s*)(productName|shortProductName|versionedName|shortVersionedName|bootloaderEntryName):.*/\1\2: DartzOS/' "$B/branding.desc" || true
+            cp /usr/share/dartzos/icono-128.png "$B/dartzos-logo.png" 2>/dev/null && \
+              sed -i -E 's/^(\s*)(productLogo|productIcon):.*/\1\2: "dartzos-logo.png"/' "$B/branding.desc" || true
+          fi
+          U=/etc/calamares/modules/unpackfs.conf
+          [ -f "$U" ] && sed -i -E 's#source: *"?[^"]*filesystem\.squashfs"?#source: "/run/dartzos/filesystem.squashfs"#' "$U" || true
+          rm -f /usr/share/applications/install-debian.desktop /etc/skel/Desktop/install-debian.desktop 2>/dev/null || true
+
           echo ">>> Terminal: colores, comandos chulos y bienvenida"
           cat >> /etc/skel/.bashrc <<'EOF'
 
@@ -95,7 +170,7 @@ jobs:
           systemctl enable mbpfan 2>/dev/null || true
 
           echo ">>> Permisos y memoria automática del USB"
-          chmod +x /usr/local/bin/ayuda /usr/local/bin/dartz-fondo /usr/local/sbin/dartz-memoria-auto 2>/dev/null || true
+          chmod +x /usr/local/bin/ayuda /usr/local/bin/dartz-fondo /usr/local/bin/dartz-instalar /usr/local/sbin/dartz-memoria-auto 2>/dev/null || true
           systemctl enable dartz-memoria.service
 
           echo ">>> DartzOS listo 🐶"
@@ -163,6 +238,12 @@ jobs:
           [Install]
           WantedBy=multi-user.target
           DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/etc/systemd/system/lightdm.service.d/dartzos.conf")"
+          cat > "config/includes.chroot/etc/systemd/system/lightdm.service.d/dartzos.conf" <<'DZ_FIN'
+          # Cambia a la pantalla del escritorio en cuanto arranca (antes se quedaba en negro)
+          [Service]
+          ExecStartPost=-/bin/sh -c 'sleep 3; chvt 7'
+          DZ_FIN
           mkdir -p "$(dirname "config/includes.chroot/etc/xdg/autostart/dartz-fondo.desktop")"
           cat > "config/includes.chroot/etc/xdg/autostart/dartz-fondo.desktop" <<'DZ_FIN'
           [Desktop Entry]
@@ -227,17 +308,30 @@ jobs:
           done
           mkdir -p "$HOME/.config" && touch "$MARCA"
           DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/usr/local/bin/dartz-instalar")"
+          cat > "config/includes.chroot/usr/local/bin/dartz-instalar" <<'DZ_FIN'
+          #!/bin/bash
+          # Abre el instalador de DartzOS (para ponerlo en el disco de un ordenador)
+          SQ=$(find /run/live -name filesystem.squashfs 2>/dev/null | head -1)
+          if [ -z "$SQ" ]; then
+            zenity --error --text="No encuentro DartzOS. ¿Has arrancado desde el USB?" 2>/dev/null
+            exit 1
+          fi
+          exec sudo -E sh -c "mkdir -p /run/dartzos && ln -sf '$SQ' /run/dartzos/filesystem.squashfs && calamares"
+          DZ_FIN
           mkdir -p "$(dirname "config/includes.chroot/usr/local/sbin/dartz-memoria-auto")"
           cat > "config/includes.chroot/usr/local/sbin/dartz-memoria-auto" <<'DZ_FIN'
           #!/bin/bash
           # DartzOS: la primera vez que arranca desde un USB, crea la "memoria"
-          # en el espacio libre del USB para que TODO lo que hagas se guarde ahí.
-          # Después reinicia una sola vez. Solo toca el USB, nunca el disco del ordenador.
+          # en el espacio libre del USB, SIEMPRE despues del final de DartzOS,
+          # para que TODO lo que hagas se guarde ahi. Despues reinicia una vez.
+          # Solo toca el USB, nunca el disco del ordenador.
 
           blkid -L persistence >/dev/null 2>&1 && exit 0      # ya tiene memoria
           grep -qw persistence /proc/cmdline || exit 0
 
-          ORIGEN=$(findmnt -n -o SOURCE /run/live/medium 2>/dev/null) || exit 0
+          ORIGEN=$(findmnt -n -o SOURCE /run/live/medium 2>/dev/null)
+          [ -n "$ORIGEN" ] || ORIGEN=$(blkid -L DartzOS 2>/dev/null)
           [ -n "$ORIGEN" ] || exit 0
           if [ "$(lsblk -dno TYPE "$ORIGEN" 2>/dev/null)" = "disk" ]; then
             DISCO="$ORIGEN"
@@ -247,18 +341,31 @@ jobs:
           [ -b "$DISCO" ] || exit 0
           [ "$(lsblk -dno TRAN "$DISCO" 2>/dev/null)" = "usb" ] || exit 0   # solo USB
 
-          # ¿Hay al menos 1 GB libre en el USB?
-          LIBRE=$(sfdisk -F "$DISCO" 2>/dev/null | awk '/^ *[0-9]+ +[0-9]+ +[0-9]+/{if($3>m)m=$3} END{print m+0}')
-          [ "$LIBRE" -gt 2097152 ] || exit 0
+          # Tamano real de DartzOS (lo dice la propia ISO, sector 16 = descriptor de volumen)
+          BLOQUES=$(od -An -t u4 -j $((32768+80)) -N 4 "$DISCO" | tr -d ' ')
+          TAMBLOQ=$(od -An -t u2 -j $((32768+128)) -N 2 "$DISCO" | tr -d ' ')
+          [ -n "$BLOQUES" ] && [ -n "$TAMBLOQ" ] && [ "$BLOQUES" -gt 0 ] || exit 0
+          FIN_ISO=$(( (BLOQUES * TAMBLOQ + 511) / 512 ))
+
+          # Fin de la ultima particion que ya exista
+          FIN_PART=$(sfdisk -d "$DISCO" 2>/dev/null | awk -F'[=,]' '/start=/{s=$2+0; z=$4+0; if (s+z>m) m=s+z} END{print m+0}')
+          INICIO=$(( FIN_ISO > FIN_PART ? FIN_ISO : FIN_PART ))
+          INICIO=$(( (INICIO / 2048 + 2) * 2048 ))      # margen de seguridad + alineado a 1 MiB
+
+          TOTAL=$(blockdev --getsz "$DISCO")
+          [ $(( TOTAL - INICIO )) -gt 2097152 ] || exit 0   # al menos 1 GB libre
 
           msg(){ plymouth display-message --text="$1" 2>/dev/null; echo "$1"; }
           msg "Preparando la memoria de DartzOS en el USB... (solo esta vez)"
 
-          echo ",,L" | sfdisk --append --force --no-reread "$DISCO" || exit 0
+          echo "${INICIO},,L" | sfdisk --append --force --no-reread "$DISCO" || exit 0
           partx -a "$DISCO" 2>/dev/null || partx -u "$DISCO" 2>/dev/null || true
           udevadm settle 2>/dev/null; sleep 2
           NUEVA=$(lsblk -lnpo NAME,TYPE "$DISCO" | awk '$2=="part"{p=$1} END{print p}')
           [ -b "$NUEVA" ] || exit 0
+          # Comprobacion final: la nueva particion tiene que empezar donde hemos dicho
+          EMPIEZA=$(cat "/sys/class/block/$(basename "$NUEVA")/start" 2>/dev/null || echo 0)
+          [ "$EMPIEZA" -ge "$FIN_ISO" ] || { msg "Memoria cancelada por seguridad"; exit 0; }
           mkfs.ext4 -q -F -L persistence "$NUEVA" || exit 0
           mkdir -p /mnt/dartz-memoria
           mount "$NUEVA" /mnt/dartz-memoria || exit 0
@@ -288,6 +395,16 @@ jobs:
           Exec=xfce4-terminal --title=Forrest -x curl ascii.live/forrest
           Icon=dartzos
           Categories=Utility;
+          DZ_FIN
+          mkdir -p "$(dirname "config/includes.chroot/usr/share/applications/dartz-instalar.desktop")"
+          cat > "config/includes.chroot/usr/share/applications/dartz-instalar.desktop" <<'DZ_FIN'
+          [Desktop Entry]
+          Type=Application
+          Name=Instalar DartzOS
+          Comment=Instala DartzOS en el disco de este ordenador
+          Exec=/usr/local/bin/dartz-instalar
+          Icon=dartzos
+          Categories=System;
           DZ_FIN
           mkdir -p "$(dirname "config/includes.chroot/usr/share/dartzos/perro.txt")"
           cat > "config/includes.chroot/usr/share/dartzos/perro.txt" <<'DZ_FIN'
@@ -382,6 +499,7 @@ jobs:
           thunar-archive-plugin
           file-roller
           fonts-dejavu
+          fonts-inter
           fonts-noto-color-emoji
 
           # Internet
@@ -425,6 +543,15 @@ jobs:
           # Pantalla de arranque con el perrito
           plymouth
           plymouth-themes
+
+          # Aspecto tipo macOS (se descarga WhiteSur durante la construccion)
+          sassc
+          libglib2.0-dev-bin
+          libxml2-utils
+
+          # Instalador para ponerlo en el disco de cualquier ordenador
+          calamares
+          calamares-settings-debian
           DZ_FIN
           mkdir -p "$(dirname "config/includes.chroot/etc/skel/.config/fastfetch/config.jsonc")"
           cat > "config/includes.chroot/etc/skel/.config/fastfetch/config.jsonc" <<'DZ_FIN'
@@ -455,35 +582,16 @@ jobs:
             ]
           }
           DZ_FIN
-          mkdir -p "$(dirname "config/includes.chroot/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml")"
-          cat > "config/includes.chroot/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml" <<'DZ_FIN'
+          mkdir -p "$(dirname "config/includes.chroot/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml")"
+          cat > "config/includes.chroot/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml" <<'DZ_FIN'
           <?xml version="1.0" encoding="UTF-8"?>
-          <!-- Ventanas: botoncitos de minimizar, maximizar y cerrar, tamaño Retina -->
-          <channel name="xfwm4" version="1.0">
-            <property name="general" type="empty">
-              <property name="theme" type="string" value="Default-xhdpi"/>
-              <property name="button_layout" type="string" value="O|HMC"/>
-              <property name="title_alignment" type="string" value="center"/>
-              <property name="use_compositing" type="bool" value="true"/>
-            </property>
-          </channel>
-          DZ_FIN
-          mkdir -p "$(dirname "config/includes.chroot/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml")"
-          cat > "config/includes.chroot/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml" <<'DZ_FIN'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!-- Aspecto de DartzOS: tema oscuro y todo al doble de tamaño para la pantalla Retina del MacBook -->
-          <channel name="xsettings" version="1.0">
-            <property name="Net" type="empty">
-              <property name="ThemeName" type="string" value="Greybird-dark"/>
-              <property name="IconThemeName" type="string" value="elementary-xfce-dark"/>
-            </property>
-            <property name="Gdk" type="empty">
-              <property name="WindowScalingFactor" type="int" value="2"/>
-            </property>
-            <property name="Gtk" type="empty">
-              <property name="CursorThemeSize" type="int" value="48"/>
-              <property name="FontName" type="string" value="DejaVu Sans 10"/>
-              <property name="MonospaceFontName" type="string" value="DejaVu Sans Mono 11"/>
+          <!-- No mostrar en el escritorio los discos del ordenador (macOS, Windows...) -->
+          <channel name="xfce4-desktop" version="1.0">
+            <property name="desktop-icons" type="empty">
+              <property name="file-icons" type="empty">
+                <property name="show-removable" type="bool" value="false"/>
+                <property name="show-filesystem" type="bool" value="false"/>
+              </property>
             </property>
           </channel>
           DZ_FIN
@@ -656,6 +764,12 @@ jobs:
             cp -r /usr/share/live/build/bootloaders/grub-pc config/bootloaders/
             rsvg-convert /tmp/grub.svg -o config/bootloaders/grub-pc/splash.png
             grep -rlI "Live system" config/bootloaders/grub-pc 2>/dev/null | xargs -r sed -i 's/Live system/DartzOS/g' || true
+            # Menu de arranque oculto: arranca directo (pulsando Esc al encender aparece)
+            for f in config/bootloaders/grub-pc/*.cfg; do
+              sed -i -E 's/^(\s*)set timeout=.*/\1set timeout=1\n\1set timeout_style=hidden/' "$f"
+            done
+            sed -i '1i set timeout_style=hidden\nset timeout=1' config/bootloaders/grub-pc/grub.cfg 2>/dev/null || true
+            grep -rn "timeout" config/bootloaders/grub-pc/*.cfg || true
           fi
 
           echo '🐶 [4/5] Construyendo (20-40 minutos)'
