@@ -1,5 +1,5 @@
 # ===================================================
-#   DartzOS 1.1 "Guau" - se construye solo en GitHub
+#   DartzOS 1.2 "Guau" - se construye solo en GitHub
 # ===================================================
 name: Construir DartzOS
 
@@ -51,16 +51,16 @@ jobs:
           echo ">>> Poniendo nombre: DartzOS"
           rm -f /etc/os-release
           cat > /etc/os-release <<'EOF'
-          PRETTY_NAME="DartzOS 1.1 (Guau)"
+          PRETTY_NAME="DartzOS 1.2 (Guau)"
           NAME="DartzOS"
-          VERSION_ID="1.1"
-          VERSION="1.1 (Guau)"
+          VERSION_ID="1.2"
+          VERSION="1.2 (Guau)"
           VERSION_CODENAME=trixie
           ID=debian
           HOME_URL="https://www.debian.org/"
           EOF
-          printf 'DartzOS 1.1 (Guau) \\n \\l\n\n' > /etc/issue
-          echo "DartzOS 1.1 (Guau)" > /etc/issue.net
+          printf 'DartzOS 1.2 (Guau) \\n \\l\n\n' > /etc/issue
+          echo "DartzOS 1.2 (Guau)" > /etc/issue.net
 
           echo ">>> Icono del perrito"
           mkdir -p /usr/share/icons/hicolor/128x128/apps /usr/share/icons/hicolor/scalable/apps
@@ -88,8 +88,13 @@ jobs:
           echo ">>> Aspecto tipo macOS: tema WhiteSur, iconos, cursor y letra Inter"
           TEMA=Greybird-dark; ICONOS=elementary-xfce-dark; CURSOR=Adwaita; VENTANAS=Default-xhdpi
           T=/tmp/whitesur; rm -rf $T; mkdir -p $T
-          if git clone --depth 1 https://github.com/vinceliuice/WhiteSur-gtk-theme.git $T/gtk >/dev/null 2>&1; then
-            (cd $T/gtk && ./install.sh -d /usr/share/themes -c dark) || true
+          for intento in 1 2 3; do
+            git clone --depth 1 https://github.com/vinceliuice/WhiteSur-gtk-theme.git $T/gtk && break
+            echo "    (reintentando descarga de WhiteSur-gtk...)"; rm -rf $T/gtk; sleep 5
+          done
+          if [ -x $T/gtk/install.sh ]; then
+            (cd $T/gtk && HOME=/root ./install.sh -d /usr/share/themes -c dark -o normal) 2>&1 | tail -20 || true
+            ls /usr/share/themes | grep -i whitesur || echo "    WhiteSur-gtk NO se instalo"
           fi
           if git clone --depth 1 https://github.com/vinceliuice/WhiteSur-icon-theme.git $T/icons >/dev/null 2>&1; then
             (cd $T/icons && ./install.sh -d /usr/share/icons -t default) || true
@@ -158,6 +163,9 @@ jobs:
           U=/etc/calamares/modules/unpackfs.conf
           [ -f "$U" ] && sed -i -E 's#source: *"?[^"]*filesystem\.squashfs"?#source: "/run/dartzos/filesystem.squashfs"#' "$U" || true
           rm -f /usr/share/applications/install-debian.desktop /etc/skel/Desktop/install-debian.desktop 2>/dev/null || true
+          # Quitar el icono automatico "Install Debian" del escritorio
+          grep -l -i -E "calamares|install-debian" /etc/xdg/autostart/*.desktop 2>/dev/null | xargs -r rm -f
+          rm -f /usr/bin/add-calamares-desktop-icon 2>/dev/null || true
 
           echo ">>> Terminal: colores, comandos chulos y bienvenida"
           cat >> /etc/skel/.bashrc <<'EOF'
@@ -330,14 +338,14 @@ jobs:
           blkid -L persistence >/dev/null 2>&1 && exit 0      # ya tiene memoria
           grep -qw persistence /proc/cmdline || exit 0
 
-          ORIGEN=$(findmnt -n -o SOURCE /run/live/medium 2>/dev/null)
-          [ -n "$ORIGEN" ] || ORIGEN=$(blkid -L DartzOS 2>/dev/null)
-          [ -n "$ORIGEN" ] || exit 0
-          if [ "$(lsblk -dno TYPE "$ORIGEN" 2>/dev/null)" = "disk" ]; then
-            DISCO="$ORIGEN"
-          else
-            DISCO="/dev/$(lsblk -no PKNAME "$ORIGEN" 2>/dev/null | head -1)"
+          # El USB de DartzOS es el disco entero con la etiqueta "DartzOS"
+          # (no se usa /run/live/medium porque con "toram" apunta a la copia en RAM)
+          DISCO=$(lsblk -rpno NAME,TYPE,LABEL | awk '$2=="disk" && $3=="DartzOS"{print $1; exit}')
+          if [ -z "$DISCO" ]; then
+            P=$(blkid -L DartzOS 2>/dev/null)
+            [ -n "$P" ] && DISCO="/dev/$(lsblk -no PKNAME "$P" 2>/dev/null | head -1)"
           fi
+          echo "dartz-memoria: USB detectado = $DISCO"
           [ -b "$DISCO" ] || exit 0
           [ "$(lsblk -dno TRAN "$DISCO" 2>/dev/null)" = "usb" ] || exit 0   # solo USB
 
