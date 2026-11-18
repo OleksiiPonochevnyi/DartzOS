@@ -180,6 +180,16 @@ Exec=/usr/local/bin/dartz-fondo
 OnlyShowIn=XFCE;
 NoDisplay=true
 DZ_FIN
+mkdir -p "$(dirname "/etc/xdg/autostart/dartz-noche.desktop")"
+cat > "/etc/xdg/autostart/dartz-noche.desktop" <<'DZ_FIN'
+[Desktop Entry]
+Type=Application
+Name=Luz nocturna de DartzOS
+Exec=sh -c "sleep 3; /usr/local/bin/dartz-noche aplicar"
+OnlyShowIn=XFCE;
+NoDisplay=true
+X-XFCE-Autostart-Override=true
+DZ_FIN
 mkdir -p "$(dirname "/usr/local/bin/ayuda")"
 cat > "/usr/local/bin/ayuda" <<'DZ_FIN'
 #!/bin/bash
@@ -648,6 +658,8 @@ class Centro(Gtk.Window):
                             lambda b: (self.salir(), run("dartz-captura", "zona"))), True, True, 0)
         self.b_cafe = self.cuadro("weather-few-clouds-symbolic", "Café", self.cafe_cambiar)
         pequenos.pack_start(self.b_cafe, True, True, 0)
+        self.b_noche = self.cuadro("night-light-symbolic", "Noche", self.noche_cambiar)
+        pequenos.pack_start(self.b_noche, True, True, 0)
 
         # Pantalla
         self.s_brillo = self.deslizador(panel, "Pantalla", "display-brightness-symbolic", self.brillo_poner)
@@ -727,6 +739,7 @@ class Centro(Gtk.Window):
         dnd = sh("xfconf-query", "-c", "xfce4-notifyd", "-p", "/do-not-disturb") == "true"
         self.marcar(self.b_dnd, dnd)
         self.marcar(self.b_cafe, os.path.exists(os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "dartz-cafe.pid")))
+        self.marcar(self.b_noche, os.path.exists(os.path.expanduser("~/.config/dartzos-noche")))
         try:
             act, mx = int(sh("brightnessctl", "g")), int(sh("brightnessctl", "m"))
             self.s_brillo.set_value(round(act * 100 / mx))
@@ -760,6 +773,8 @@ class Centro(Gtk.Window):
         GLib.timeout_add(300, self.leer)
     def cafe_cambiar(self, *_):
         run("dartz-cafe"); GLib.timeout_add(600, self.leer)
+    def noche_cambiar(self, *_):
+        run("dartz-noche"); GLib.timeout_add(300, self.leer)
     def brillo_poner(self, v):
         run("brightnessctl", "-q", "set", f"{max(v, 3)}%")
     def vol_poner(self, v):
@@ -912,6 +927,35 @@ if [ -z "$SQ" ]; then
   exit 1
 fi
 exec sudo -E sh -c "mkdir -p /run/dartzos && ln -sf '$SQ' /run/dartzos/filesystem.squashfs && calamares"
+DZ_FIN
+mkdir -p "$(dirname "/usr/local/bin/dartz-noche")"
+cat > "/usr/local/bin/dartz-noche" <<'DZ_FIN'
+#!/bin/bash
+# DartzOS: luz nocturna (pantalla más amarilla para la tarde/noche)
+#   dartz-noche          -> encender / apagar
+#   dartz-noche aplicar  -> volver a poner lo guardado (al entrar en la sesión)
+#   dartz-noche estado   -> imprime on/off
+MARCA="$HOME/.config/dartzos-noche"
+CALIDO="1.0:0.82:0.62"
+NORMAL="1:1:1"
+
+poner() {
+    for S in $(xrandr --query 2>/dev/null | awk '/ connected/{print $1}'); do
+        xrandr --output "$S" --gamma "$1" 2>/dev/null
+    done
+}
+
+case "${1:-cambiar}" in
+    estado)  [ -e "$MARCA" ] && echo on || echo off ;;
+    aplicar) [ -e "$MARCA" ] && poner "$CALIDO" ;;
+    *)
+        if [ -e "$MARCA" ]; then
+            rm -f "$MARCA"; poner "$NORMAL"
+        else
+            mkdir -p "$HOME/.config"; touch "$MARCA"; poner "$CALIDO"
+        fi ;;
+esac
+exit 0
 DZ_FIN
 mkdir -p "$(dirname "/usr/local/bin/dartz-scroll")"
 cat > "/usr/local/bin/dartz-scroll" <<'DZ_FIN'
