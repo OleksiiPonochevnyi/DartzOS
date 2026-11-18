@@ -1,0 +1,1987 @@
+#!/bin/bash
+# DartzOS: actualizar a la version 2.0 sin borrar tu cuenta ni tus archivos
+set -uo pipefail
+[ "$(id -u)" = 0 ] || { echo "Hay que ejecutarlo con sudo:  sudo dartz-actualizar"; exit 1; }
+echo "🐶 Actualizando DartzOS a la version 2.0"
+if ! grep -qw persistence /proc/cmdline || [ -z "$(blkid -L persistence 2>/dev/null)" ]; then
+  echo "❌ Este USB no tiene memoria: lo que actualice se perderia al apagar."; exit 1
+fi
+ACTUAL=$(cat /etc/dartzos/version 2>/dev/null || echo 1.4)
+echo "   Tienes la $ACTUAL. Tu cuenta, tus archivos y tus programas se quedan."
+export DEBIAN_FRONTEND=noninteractive
+echo "🐶 [1/4] Programas nuevos (puede tardar unos minutos)"
+apt-get update || { echo "❌ Sin internet"; exit 1; }
+apt-get install -y --no-upgrade live-boot live-config live-config-systemd user-setup sudo locales console-setup keyboard-configuration fdisk e2fsprogs xorg xfce4 xfce4-terminal xfce4-whiskermenu-plugin xfce4-pulseaudio-plugin xfce4-power-manager xfce4-screenshooter xfce4-taskmanager xfce4-notifyd lightdm lightdm-gtk-greeter greybird-gtk-theme elementary-xfce-icon-theme mousepad ristretto thunar-archive-plugin file-roller fonts-dejavu fonts-inter fonts-noto-color-emoji network-manager network-manager-gnome firefox-esr firefox-esr-l10n-es-es curl wget ca-certificates pipewire pipewire-pulse wireplumber pavucontrol fastfetch htop nano git cmatrix sl cowsay figlet lolcat fortune-mod fortunes-es bastet ninvaders moon-buggy firmware-brcm80211 firmware-misc-nonfree firmware-linux-free intel-microcode mbpfan plymouth plymouth-themes sassc libglib2.0-dev-bin libxml2-utils calamares calamares-settings-debian zenity libnotify-bin light-locker accountsservice xdotool maim xclip xdg-user-dirs xz-utils gnome-keyring libpam-gnome-keyring xinput python3-gi gir1.2-gtk-3.0 gir1.2-wnck-3.0 python3-gi-cairo brightnessctl playerctl bluez blueman pciutils pulseaudio-utils systemd-timesyncd shim-signed grub-efi-amd64-signed || echo "   (algun programa no se pudo instalar, sigo)"
+echo "🐶 [2/4] Archivos de DartzOS"
+
+mkdir -p "$(dirname "/etc/X11/xorg.conf.d/30-touchpad.conf")"
+cat > "/etc/X11/xorg.conf.d/30-touchpad.conf" <<'DZ_FIN'
+# Trackpad del MacBook: tocar para hacer clic y scroll como en macOS
+Section "InputClass"
+    Identifier "DartzOS trackpad"
+    MatchIsTouchpad "on"
+    Driver "libinput"
+    Option "Tapping" "on"
+    Option "NaturalScrolling" "true"
+    Option "ClickMethod" "clickfinger"
+    Option "DisableWhileTyping" "on"
+    # Scroll mas lento y suave (cuanto mas alto, mas despacio; lo normal es 15). Se cambia con "dartz-scroll"
+    Option "ScrollPixelDistance" "90"
+    # Puntero: aceleracion segun lo rapido que muevas el dedo, como en el Mac,
+    # pero un poco mas tranquilo
+    Option "AccelProfile" "adaptive"
+    Option "AccelSpeed" "-0.25"
+EndSection
+DZ_FIN
+mkdir -p "$(dirname "/etc/dartzos/bashrc")"
+cat > "/etc/dartzos/bashrc" <<'DZ_FIN'
+# ===== Terminal de DartzOS =====
+
+# Prompt: dartz@DartzOS:~$
+PS1='\[\e[1;33m\]\u\[\e[0m\]@\[\e[1;34m\]DartzOS\[\e[0m\]:\[\e[1;36m\]\w\[\e[0m\]\$ '
+
+# Pegar comandos sin caracteres raros (^[[200~)
+bind "set enable-bracketed-paste off" 2>/dev/null
+
+# Comandos chulos
+alias forrest='curl ascii.live/forrest'
+alias loro='curl parrot.live'
+alias tiempo='curl "wttr.in/?lang=es"'
+alias matrix='cmatrix'
+alias tren='sl'
+alias tetris='bastet'
+alias marcianos='ninvaders'
+alias luna='moon-buggy'
+alias guau='fortune -s | cowsay'
+alias info='fastfetch'
+alias ls='ls --color=auto'
+alias ll='ls -la --color=auto'
+
+# Bienvenida al abrir la terminal
+if [ -z "$DARTZ_HOLA" ]; then
+  export DARTZ_HOLA=1
+  command -v fastfetch >/dev/null && fastfetch
+  echo "Escribe  ayuda  para ver los comandos chulos de DartzOS 🐶"
+fi
+DZ_FIN
+mkdir -p "$(dirname "/etc/lightdm/lightdm.conf.d/50-dartzos-pantalla.conf")"
+cat > "/etc/lightdm/lightdm.conf.d/50-dartzos-pantalla.conf" <<'DZ_FIN'
+[Seat:*]
+display-setup-script=/usr/local/sbin/dartz-pantalla-login
+DZ_FIN
+mkdir -p "$(dirname "/etc/mbpfan.conf")"
+cat > "/etc/mbpfan.conf" <<'DZ_FIN'
+# Ventiladores del MacBook en DartzOS: suben poco a poco (60 grados minimo, desde 72 sube, 90 a tope)
+[general]
+min_fan1_speed = 1800
+max_fan1_speed = 6200
+low_temp = 60
+high_temp = 72
+max_temp = 90
+polling_interval = 2
+DZ_FIN
+mkdir -p "$(dirname "/etc/modprobe.d/brcmfmac.conf")"
+cat > "/etc/modprobe.d/brcmfmac.conf" <<'DZ_FIN'
+# WiFi Broadcom BCM43602 del MacBook Pro 2015.
+# Desactiva funciones que a veces impiden conectarse a redes WPA2.
+options brcmfmac feature_disable=0x82000
+DZ_FIN
+mkdir -p "$(dirname "/etc/systemd/logind.conf.d/dartzos.conf")"
+cat > "/etc/systemd/logind.conf.d/dartzos.conf" <<'DZ_FIN'
+# Al cerrar la tapa: dormir (no apagar ni reiniciar). Al abrir pide la contraseña.
+[Login]
+HandleLidSwitch=suspend
+HandleLidSwitchExternalPower=suspend
+HandleLidSwitchDocked=ignore
+DZ_FIN
+mkdir -p "$(dirname "/etc/systemd/system/dartz-memoria.service")"
+cat > "/etc/systemd/system/dartz-memoria.service" <<'DZ_FIN'
+[Unit]
+Description=DartzOS: preparar la memoria del USB
+After=local-fs.target systemd-udev-trigger.service
+Before=display-manager.service
+ConditionKernelCommandLine=persistence
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/dartz-memoria-auto
+TimeoutSec=600
+
+[Install]
+WantedBy=multi-user.target
+DZ_FIN
+mkdir -p "$(dirname "/etc/systemd/system/dartz-migrar.service")"
+cat > "/etc/systemd/system/dartz-migrar.service" <<'DZ_FIN'
+[Unit]
+Description=DartzOS: aspecto nuevo para los usuarios tras actualizar
+After=local-fs.target
+Before=display-manager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/dartz-migrar
+
+[Install]
+WantedBy=multi-user.target
+DZ_FIN
+mkdir -p "$(dirname "/etc/systemd/system/dartz-teclado.service")"
+cat > "/etc/systemd/system/dartz-teclado.service" <<'DZ_FIN'
+[Unit]
+Description=DartzOS: teclado espanol tambien en la pantalla negra (consola)
+After=console-setup.service keyboard-setup.service live-config.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'setupcon -k --force || true'
+
+[Install]
+WantedBy=multi-user.target
+DZ_FIN
+mkdir -p "$(dirname "/etc/systemd/system/lightdm.service.d/dartzos.conf")"
+cat > "/etc/systemd/system/lightdm.service.d/dartzos.conf" <<'DZ_FIN'
+# Cambia a la pantalla del escritorio en cuanto arranca (antes se quedaba en negro)
+[Service]
+ExecStartPost=-/bin/sh -c 'sleep 1; chvt 7'
+DZ_FIN
+mkdir -p "$(dirname "/etc/xdg/autostart/dartz-ajuste.desktop")"
+cat > "/etc/xdg/autostart/dartz-ajuste.desktop" <<'DZ_FIN'
+[Desktop Entry]
+Type=Application
+Name=DartzOS: marca al colocar ventanas
+Exec=dartz-ajuste
+OnlyShowIn=XFCE;
+NoDisplay=true
+DZ_FIN
+mkdir -p "$(dirname "/etc/xdg/autostart/dartz-bienvenida.desktop")"
+cat > "/etc/xdg/autostart/dartz-bienvenida.desktop" <<'DZ_FIN'
+[Desktop Entry]
+Type=Application
+Name=Bienvenida de DartzOS
+Exec=/usr/local/bin/dartz-bienvenida
+OnlyShowIn=XFCE;
+NoDisplay=true
+DZ_FIN
+mkdir -p "$(dirname "/etc/xdg/autostart/dartz-escala.desktop")"
+cat > "/etc/xdg/autostart/dartz-escala.desktop" <<'DZ_FIN'
+[Desktop Entry]
+Type=Application
+Name=Tamaño de pantalla de DartzOS
+Exec=/usr/local/bin/dartz-escala
+OnlyShowIn=XFCE;
+NoDisplay=true
+X-XFCE-Autostart-Override=true
+DZ_FIN
+mkdir -p "$(dirname "/etc/xdg/autostart/dartz-fondo.desktop")"
+cat > "/etc/xdg/autostart/dartz-fondo.desktop" <<'DZ_FIN'
+[Desktop Entry]
+Type=Application
+Name=Fondo de DartzOS
+Exec=/usr/local/bin/dartz-fondo
+OnlyShowIn=XFCE;
+NoDisplay=true
+DZ_FIN
+mkdir -p "$(dirname "/usr/local/bin/ayuda")"
+cat > "/usr/local/bin/ayuda" <<'DZ_FIN'
+#!/bin/bash
+# Lista de comandos chulos de DartzOS
+if command -v figlet >/dev/null && command -v lolcat >/dev/null; then
+  figlet -f standard DartzOS | lolcat
+else
+  echo "=== DartzOS ==="
+fi
+cat <<'EOF'
+
+  🐶  COMANDOS CHULOS
+  ─────────────────────────────────────────────
+  forrest        Forrest Gump corriendo en ASCII (Ctrl+C para salir)
+  loro           Un loro bailando (parrot.live)
+  tiempo         El tiempo donde estás
+  matrix         Lluvia de letras como en Matrix
+  tren           Pasa un tren por la terminal
+  guau           El perro te dice una frase
+  info           Información del ordenador con el logo
+
+  🎮  JUEGOS
+  ─────────────────────────────────────────────
+  tetris         Tetris (bastet)
+  marcianos      Space Invaders
+  luna           Coche lunar saltando cráteres
+
+  ☕  COMO EN EL MAC
+  ─────────────────────────────────────────────
+  caffeinate     No dormir hasta Ctrl+C (también: caffeinate -t 600)
+  ⌘ + espacio    Buscar apps (como Spotlight)
+  ⌘ + ⇧ + 3 / 4 / 5  Captura: pantalla / zona / ventana (al Escritorio)
+  + ctrl         Copiar la captura en vez de guardarla
+  ⌘ + C / V / X  Copiar / pegar / cortar (también ⌘A ⌘Z ⌘F ⌘S ⌘W)
+  ctrl+⌥+flechas Ventana a la izquierda/derecha/arriba/abajo
+  ctrl+⌥+U I J K Ventana a una esquina   ctrl+⌥+Enter grande
+  ctrl + ⌘ + F   Pantalla completa (se esconden la barra y el dock)
+  ⌘ + Q          Cerrar ventana       ⌘ + T  Terminal
+  Cerrar la tapa Duerme y al abrir pide tu contraseña
+  Ctrl + espacio Cambiar teclado (ES Mac / ES / US), arriba a la derecha
+  ⇧ + 3          Punto medio ·     ⌥ + 1  |     ⌥ + º  \
+
+  🛠  ÚTILES
+  ─────────────────────────────────────────────
+  dartz-scroll   Cambiar la velocidad del scroll del trackpad
+  htop           Ver qué programas usan el ordenador (q para salir)
+  sudo dartz-actualizar   Poner la última versión de DartzOS sin borrar nada
+  nano archivo   Editar un archivo de texto
+  curl URL       Descargar o ver una web desde la terminal
+
+  💾 Todo lo que hagas se guarda solo en el USB, aunque lo uses en otro ordenador.
+
+  Truco: Ctrl+C para parar cualquier cosa. Escribe 'clear' para limpiar.
+EOF
+DZ_FIN
+mkdir -p "$(dirname "/usr/local/bin/caffeinate")"
+cat > "/usr/local/bin/caffeinate" <<'DZ_FIN'
+#!/bin/bash
+# caffeinate (como en macOS): evita que el ordenador se duerma.
+#   caffeinate            -> despierto hasta que pulses Ctrl+C
+#   caffeinate -t 600     -> despierto 600 segundos
+#   caffeinate comando    -> despierto mientras dure el comando
+W="idle:sleep:handle-lid-switch"
+if [ "$1" = "-t" ] && [ -n "$2" ]; then
+  echo "☕ Despierto durante $2 segundos (Ctrl+C para parar)"
+  exec systemd-inhibit --what=$W --who=caffeinate --why="caffeinate -t $2" sleep "$2"
+elif [ $# -gt 0 ]; then
+  exec systemd-inhibit --what=$W --who=caffeinate --why="$*" "$@"
+else
+  echo "☕ DartzOS no se dormirá (ni al cerrar la tapa) hasta que pulses Ctrl+C"
+  exec systemd-inhibit --what=$W --who=caffeinate --why="caffeinate" sleep infinity
+fi
+DZ_FIN
+mkdir -p "$(dirname "/usr/local/bin/dartz-acerca")"
+cat > "/usr/local/bin/dartz-acerca" <<'DZ_FIN'
+#!/usr/bin/python3
+# "Acerca de este ordenador" de DartzOS
+import os, re, subprocess, math
+import gi
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk, Gdk, GdkPixbuf, GLib
+
+def sh(*c):
+    try: return subprocess.run(c, capture_output=True, text=True, timeout=3).stdout.strip()
+    except Exception: return ""
+def leer(f):
+    try: return open(f).read().strip()
+    except Exception: return ""
+
+MODELOS = {
+    "MacBookPro11,1": ("MacBook Pro", "Retina, 13 pulgadas, finales de 2013"),
+    "MacBookPro12,1": ("MacBook Pro", "Retina, 13 pulgadas, principios de 2015"),
+    "MacBookPro11,4": ("MacBook Pro", "Retina, 15 pulgadas, mediados de 2015"),
+    "MacBookPro13,1": ("MacBook Pro", "13 pulgadas, 2016"),
+    "MacBookAir7,2":  ("MacBook Air", "13 pulgadas, principios de 2015"),
+    "MacBookAir7,1":  ("MacBook Air", "11 pulgadas, principios de 2015"),
+}
+prod = leer("/sys/class/dmi/id/product_name")
+marca = leer("/sys/class/dmi/id/sys_vendor")
+nombre, sub = MODELOS.get(prod, (prod or "Ordenador", marca))
+if prod.startswith("MacBook") and prod not in MODELOS:
+    nombre, sub = re.sub(r"\d.*", "", prod).replace("MacBookPro", "MacBook Pro").replace("MacBookAir", "MacBook Air"), prod
+
+cpu = ""; nucleos = ""
+for l in leer("/proc/cpuinfo").splitlines():
+    if l.startswith("model name") and not cpu: cpu = l.split(":", 1)[1].strip()
+    if l.startswith("cpu cores") and not nucleos: nucleos = l.split(":", 1)[1].strip()
+ghz = re.search(r"@ *([\d.]+)GHz", cpu)
+cpu_c = re.sub(r"\((R|TM)\)|CPU|@.*", "", cpu).replace("  ", " ").strip()
+cpu_txt = (f"{ghz.group(1).replace('.', ',')} GHz " if ghz else "") + (f"{cpu_c}, {nucleos} núcleos" if nucleos else cpu_c)
+
+gpu = ""
+for l in sh("lspci").splitlines():
+    if "VGA" in l or "3D controller" in l or "Display controller" in l:
+        gpu = l.split(":", 2)[-1].strip()
+        gpu = re.sub(r"\(rev.*\)|Corporation|Integrated Graphics Controller", "", gpu)
+        gpu = re.sub(r"\s+", " ", gpu).strip(); break
+mem_kb = int((re.search(r"MemTotal:\s+(\d+)", leer("/proc/meminfo")) or [0, "0"])[1])
+mem = f"{max(1, round(mem_kb / 1024 / 1024))} GB"
+
+disco = "Memoria USB DartzOS"
+for l in sh("lsblk", "-rpno", "NAME,TYPE,LABEL,SIZE,MODEL").splitlines():
+    p = l.split()
+    if len(p) >= 4 and p[1] == "disk" and p[2] == "DartzOS":
+        disco = f"Memoria USB DartzOS ({p[3].replace('G', ' GB')})"; break
+
+os_rel = dict(re.findall(r'^(\w+)="?([^"\n]*)"?', leer("/etc/os-release"), re.M))
+sistema = os_rel.get("PRETTY_NAME", "DartzOS")
+
+CSS = b"""
+window, .fondo { background-color: #1e1e21; }
+.nombre { font-family: Inter; font-weight: 700; font-size: 22pt; color: #f5f5f7; }
+.sub { color: rgba(245,245,247,0.55); font-size: 10.5pt; }
+.clave { color: #f5f5f7; font-weight: 600; font-size: 10.5pt; }
+.valor { color: rgba(245,245,247,0.75); font-size: 10.5pt; }
+.pie { color: rgba(245,245,247,0.4); font-size: 9pt; }
+button.mas { background: rgba(255,255,255,0.14); color: #f5f5f7; border: none; border-radius: 7px;
+             padding: 4px 16px; box-shadow: none; font-size: 10.5pt; }
+button.mas:hover { background: rgba(255,255,255,0.22); }
+"""
+prov = Gtk.CssProvider(); prov.load_from_data(CSS)
+Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), prov, 800)
+
+w = Gtk.Window(title="Acerca de este ordenador")
+w.set_resizable(False); w.set_position(Gtk.WindowPosition.CENTER); w.connect("destroy", Gtk.main_quit)
+caja = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin=36)
+caja.get_style_context().add_class("fondo"); w.add(caja)
+
+img = "/usr/share/dartzos/portatil.svg"
+if os.path.exists(img):
+    try:
+        caja.pack_start(Gtk.Image.new_from_pixbuf(GdkPixbuf.Pixbuf.new_from_file_at_size(img, 240, 170)), False, False, 10)
+    except Exception: pass
+for texto, clase, mb in ((nombre, "nombre", 0), (sub, "sub", 18)):
+    l = Gtk.Label(label=texto); l.get_style_context().add_class(clase); l.set_margin_bottom(mb); caja.pack_start(l, False, False, 0)
+
+g = Gtk.Grid(column_spacing=12, row_spacing=6, halign=Gtk.Align.CENTER); caja.pack_start(g, False, False, 0)
+filas = [("Procesador", cpu_txt), ("Gráficos", gpu or "—"), ("Memoria", mem), ("Disco de arranque", disco), ("Sistema", sistema)]
+for i, (k, v) in enumerate(filas):
+    a = Gtk.Label(label=k, xalign=1); a.get_style_context().add_class("clave")
+    b = Gtk.Label(label=v, xalign=0); b.get_style_context().add_class("valor"); b.set_line_wrap(True); b.set_max_width_chars(34)
+    b.set_selectable(True)
+    g.attach(a, 0, i, 1, 1); g.attach(b, 1, i, 1, 1)
+
+bt = Gtk.Button(label="Más información…", halign=Gtk.Align.CENTER, margin_top=22)
+bt.get_style_context().add_class("mas")
+bt.connect("clicked", lambda *_: subprocess.Popen(["xfce4-terminal", "--hold", "--title=Información del sistema", "-x", "fastfetch"]))
+caja.pack_start(bt, False, False, 0)
+pie = Gtk.Label(label="DartzOS · hecho por Alex 🐶", margin_top=18); pie.get_style_context().add_class("pie")
+caja.pack_start(pie, False, False, 0)
+w.show_all()
+Gtk.main()
+DZ_FIN
+mkdir -p "$(dirname "/usr/local/bin/dartz-ajuste")"
+cat > "/usr/local/bin/dartz-ajuste" <<'DZ_FIN'
+#!/usr/bin/python3
+# Marca translucida al arrastrar una ventana a un borde (como en macOS):
+# izquierda/derecha = media pantalla, arriba = pantalla entera. Al soltar, la ventana se coloca ahi.
+import gi
+gi.require_version("Gtk", "3.0"); gi.require_version("Wnck", "3.0")
+from gi.repository import Gtk, Gdk, GLib, Wnck
+import cairo
+
+BORDE = 3
+class Marca(Gtk.Window):
+    def __init__(self):
+        super().__init__(type=Gtk.WindowType.POPUP)
+        self.set_app_paintable(True)
+        vis = self.get_screen().get_rgba_visual()
+        if vis: self.set_visual(vis)
+        self.connect("draw", self.dibujar)
+        self.connect("realize", lambda w: w.input_shape_combine_region(cairo.Region()))  # los clics la atraviesan
+        self.zona = None
+    def dibujar(self, w, cr):
+        cr.set_operator(cairo.OPERATOR_SOURCE); cr.set_source_rgba(0, 0, 0, 0); cr.paint()
+        cr.set_operator(cairo.OPERATOR_OVER)
+        a, h, r, m = self.get_allocated_width(), self.get_allocated_height(), 14, 6
+        x0, y0, x1, y1 = m, m, a - m, h - m
+        cr.new_path()
+        cr.arc(x1 - r, y0 + r, r, -1.5708, 0); cr.arc(x1 - r, y1 - r, r, 0, 1.5708)
+        cr.arc(x0 + r, y1 - r, r, 1.5708, 3.1416); cr.arc(x0 + r, y0 + r, r, 3.1416, 4.7124); cr.close_path()
+        cr.set_source_rgba(1, 1, 1, 0.12); cr.fill_preserve()
+        cr.set_source_rgba(1, 1, 1, 0.45); cr.set_line_width(1.5); cr.stroke()
+    def poner(self, zona, rect):
+        if zona == self.zona: return
+        self.zona = zona
+        if not zona: self.hide(); return
+        self.move(rect.x, rect.y); self.resize(rect.width, rect.height); self.show_all(); self.queue_draw()
+
+marca = Marca()
+pantalla = Wnck.Screen.get_default(); pantalla.force_update()
+estado = {"pulsado": False, "ventana": None, "pos": None, "arrastrando": False}
+
+def mirar():
+    d = Gdk.Display.get_default()
+    seat = d.get_default_seat(); puntero = seat.get_pointer()
+    _w, x, y, mascara = Gdk.get_default_root_window().get_device_position(puntero)
+    pulsado = bool(mascara & Gdk.ModifierType.BUTTON1_MASK)
+    if pulsado and not estado["pulsado"]:
+        v = pantalla.get_active_window()
+        estado.update(ventana=v, pos=v.get_geometry()[:2] if v else None, arrastrando=False)
+    elif pulsado and estado["ventana"] and not estado["arrastrando"]:
+        try:
+            if estado["ventana"].get_geometry()[:2] != estado["pos"]: estado["arrastrando"] = True
+        except Exception:
+            estado["ventana"] = None
+    estado["pulsado"] = pulsado
+    zona = None
+    if pulsado and estado["arrastrando"]:
+        mon = d.get_monitor_at_point(x, y); g, wa = mon.get_geometry(), mon.get_workarea()
+        if x <= g.x + BORDE:
+            zona = ("izq", Gdk.Rectangle()); r = zona[1]; r.x, r.y, r.width, r.height = wa.x, wa.y, wa.width // 2, wa.height
+        elif x >= g.x + g.width - 1 - BORDE:
+            zona = ("der", Gdk.Rectangle()); r = zona[1]; r.x, r.y, r.width, r.height = wa.x + wa.width // 2, wa.y, wa.width - wa.width // 2, wa.height
+        elif y <= g.y + BORDE:
+            zona = ("arriba", Gdk.Rectangle()); r = zona[1]; r.x, r.y, r.width, r.height = wa.x, wa.y, wa.width, wa.height
+    if zona: marca.poner(zona[0], zona[1])
+    else: marca.poner(None, None)
+    return True
+
+GLib.timeout_add(50, mirar)
+Gtk.main()
+DZ_FIN
+mkdir -p "$(dirname "/usr/local/bin/dartz-bienvenida")"
+cat > "/usr/local/bin/dartz-bienvenida" <<'DZ_FIN'
+#!/bin/bash
+# Asistente de bienvenida de DartzOS: crea tu usuario (y opcionalmente instala Google Chrome).
+# Solo se ejecuta en el usuario interno "dartz" del USB y solo hasta que creas tu usuario.
+MARCA=/var/lib/dartzos/usuario-creado
+[ -d /run/live ] || exit 0
+[ "$(id -un)" = "dartz" ] || exit 0
+
+sin_autologin() {
+  sudo sed -i -E 's/^(autologin-user|autologin-user-timeout|autologin-session)=/#&/' /etc/lightdm/lightdm.conf 2>/dev/null
+  sudo grep -rl '^autologin-user' /etc/lightdm/lightdm.conf.d 2>/dev/null | xargs -r sudo sed -i -E 's/^(autologin-user)/#\1/'
+  printf '[Seat:*]\ngreeter-hide-users=false\nuser-session=xfce\n' | sudo tee /etc/lightdm/lightdm.conf.d/90-dartzos.conf >/dev/null
+}
+# Si ya creaste tu usuario y aun asi entra solo "dartz", volvemos a la pantalla de contrasena
+if [ -f "$MARCA" ]; then sin_autologin; sudo systemctl restart lightdm; exit 0; fi
+sleep 5
+T="Bienvenido a DartzOS"
+zenity --info --title="$T" --width=460 --ok-label="Empezar" \
+  --text="<big><b>¡Hola! 🐶</b></big>\n\nVamos a preparar DartzOS para ti:\n\n  1. Crear tu usuario y tu contraseña\n  2. Instalar Google Chrome (si tienes internet)\n\nTodo se guarda en el USB." || exit 0
+
+while true; do
+  DATOS=$(zenity --forms --title="Crea tu usuario" --width=460 --separator="|" \
+    --text="Con esto entrarás en DartzOS cada vez que lo enciendas." \
+    --add-entry="Tu nombre" --add-entry="Usuario (minúsculas, sin espacios)" \
+    --add-password="Contraseña" --add-password="Repite la contraseña") || exit 0
+  IFS='|' read -r NOMBRE USUARIO P1 P2 <<< "$DATOS"
+  USUARIO=$(printf '%s' "$USUARIO" | tr 'A-Z' 'a-z')
+  if ! [[ "$USUARIO" =~ ^[a-z][a-z0-9_-]{1,30}$ ]]; then
+    zenity --error --width=400 --text="El usuario solo puede tener letras minúsculas, números, - y _, y tiene que empezar por una letra."; continue; fi
+  if [ "$USUARIO" = dartz ] || [ "$USUARIO" = root ] || id "$USUARIO" >/dev/null 2>&1; then
+    zenity --error --width=400 --text="Ese usuario no se puede usar. Elige otro."; continue; fi
+  if [ ${#P1} -lt 4 ]; then zenity --error --width=400 --text="La contraseña tiene que tener al menos 4 caracteres."; continue; fi
+  if [ "$P1" != "$P2" ]; then zenity --error --width=400 --text="Las contraseñas no coinciden."; continue; fi
+  [ -z "$NOMBRE" ] && NOMBRE="$USUARIO"
+  break
+done
+
+(
+echo "10"; echo "# Creando tu usuario..."
+sudo useradd -m -s /bin/bash -c "$NOMBRE" "$USUARIO"
+printf '%s:%s\n' "$USUARIO" "$P1" | sudo chpasswd
+for g in sudo audio video plugdev netdev bluetooth lpadmin scanner users input; do
+  getent group $g >/dev/null && sudo usermod -aG $g "$USUARIO"
+done
+# Que las redes WiFi guardadas sirvan para todos los usuarios
+sudo sed -i '/^permissions=/d' /etc/NetworkManager/system-connections/*.nmconnection 2>/dev/null
+echo "60"; echo "# Activando el inicio con contraseña..."
+sin_autologin
+sudo mkdir -p /var/lib/AccountsService/users /var/lib/AccountsService/icons
+printf '[User]\nSystemAccount=true\n' | sudo tee /var/lib/AccountsService/users/dartz >/dev/null
+sudo cp /usr/share/dartzos/icono-128.png "/var/lib/AccountsService/icons/$USUARIO"
+printf '[User]\nIcon=/var/lib/AccountsService/icons/%s\n' "$USUARIO" | sudo tee "/var/lib/AccountsService/users/$USUARIO" >/dev/null
+echo "100"
+) | zenity --progress --title="$T" --width=420 --auto-close --no-cancel
+
+if zenity --question --title="Google Chrome" --width=440 --ok-label="Instalar Chrome" --cancel-label="Más tarde" \
+   --text="¿Quieres instalar <b>Google Chrome</b> ahora?\n\nNecesitas internet: conéctate al WiFi (arriba a la derecha) antes de pulsar Instalar.\n\nSi no, puedes hacerlo luego desde el menú → <i>Instalar Google Chrome</i>."; then
+  sudo /usr/local/sbin/dartz-instalar-chrome "$USUARIO" | zenity --progress --pulsate --title="Instalando Google Chrome" --width=420 --auto-close --no-cancel \
+    --text="Descargando Chrome... (puede tardar unos minutos)"
+  if command -v google-chrome >/dev/null; then
+    zenity --info --width=380 --text="✅ Google Chrome instalado."
+  else
+    zenity --warning --width=420 --text="No se pudo instalar Chrome (¿hay internet?).\nPrueba luego desde el menú → Instalar Google Chrome."
+  fi
+fi
+
+sudo mkdir -p /var/lib/dartzos && sudo touch "$MARCA"
+sudo passwd -l dartz >/dev/null 2>&1
+zenity --info --title="$T" --width=440 --ok-label="Entrar" \
+  --text="<big><b>¡Listo, $NOMBRE! 🎉</b></big>\n\nA partir de ahora DartzOS te pedirá tu contraseña al encender y al abrir la tapa.\n\nAhora se cerrará esta sesión y entrarás con tu usuario."
+sudo systemctl restart lightdm
+DZ_FIN
+mkdir -p "$(dirname "/usr/local/bin/dartz-cafe")"
+cat > "/usr/local/bin/dartz-cafe" <<'DZ_FIN'
+#!/bin/bash
+# Interruptor de "café": activa o desactiva que el ordenador no se duerma
+PID="$XDG_RUNTIME_DIR/dartz-cafe.pid"
+if [ -f "$PID" ] && kill -0 "$(cat "$PID")" 2>/dev/null; then
+  kill "$(cat "$PID")"; rm -f "$PID"
+  notify-send -i dartzos "Café apagado" "DartzOS volverá a dormirse normalmente."
+else
+  systemd-inhibit --what=idle:sleep:handle-lid-switch --who=DartzOS --why="Café" sleep infinity &
+  echo $! > "$PID"
+  notify-send -i dartzos "☕ Café encendido" "DartzOS no se dormirá, ni al cerrar la tapa. Vuelve a pulsar para apagarlo."
+fi
+DZ_FIN
+mkdir -p "$(dirname "/usr/local/bin/dartz-captura")"
+cat > "/usr/local/bin/dartz-captura" <<'DZ_FIN'
+#!/bin/bash
+# Capturas de pantalla como en el Mac, sin abrir ninguna ventana:
+#   ⌘⇧3 pantalla entera · ⌘⇧4 zona · ⌘⇧5 ventana · con Ctrl ademas -> se copia (no se guarda)
+# Se guardan en el Escritorio como "Captura 2026-11-16 a las 22.46.12.png"
+MODO="${1:-completa}"; COPIAR="${2:-}"
+DIR=$(xdg-user-dir DESKTOP 2>/dev/null); [ -d "$DIR" ] && [ "$DIR" != "$HOME" ] || DIR="$HOME/Escritorio"
+mkdir -p "$DIR"
+F="$DIR/Captura $(date +%Y-%m-%d) a las $(date +%H.%M.%S).png"
+case "$MODO" in
+  zona)    OPC=(-s -u -b 2 -c 0.16,0.6,1,0.9 -d 0.3) ;;   # -d: espera a que se quite el marco azul
+  ventana) OPC=(-i "$(xdotool getactivewindow)") ;;
+  *)       OPC=() ;;
+esac
+TMP=$(mktemp --suffix=.png)
+if ! maim "${OPC[@]}" "$TMP" 2>/dev/null; then rm -f "$TMP"; exit 0; fi   # Esc = cancelar
+if [ "$COPIAR" = copiar ]; then
+  xclip -selection clipboard -t image/png -i "$TMP"; rm -f "$TMP"
+  notify-send -i camera-photo -t 2000 "Captura copiada" "Pégala con ⌘V"
+else
+  mv "$TMP" "$F"
+  notify-send -i "$F" -t 3000 "Captura guardada" "En el Escritorio: $(basename "$F")"
+fi
+DZ_FIN
+mkdir -p "$(dirname "/usr/local/bin/dartz-control")"
+cat > "/usr/local/bin/dartz-control" <<'DZ_FIN'
+#!/usr/bin/python3
+# Centro de control de DartzOS (como el de macOS): wifi, bluetooth, no molestar,
+# brillo, volumen y musica. Se abre/cierra con el icono de la barra de arriba.
+import os, sys, signal, subprocess, shutil
+import gi
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk, Gdk, GLib
+
+PID = f"/tmp/dartz-control-{os.getuid()}.pid"
+try:  # segundo clic en el icono = cerrar
+    old = int(open(PID).read())
+    os.kill(old, signal.SIGTERM)
+    os.remove(PID)
+    sys.exit(0)
+except Exception:
+    pass
+open(PID, "w").write(str(os.getpid()))
+
+def sh(*cmd):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=3).stdout.strip()
+    except Exception:
+        return ""
+def run(*cmd):
+    try:
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+CSS = b"""
+window { background: transparent; }
+.panel { background-color: rgba(34,34,38,0.86); border-radius: 18px;
+         border: 1px solid rgba(255,255,255,0.13); padding: 12px; }
+.tile { background-color: rgba(255,255,255,0.08); border-radius: 14px; padding: 10px 12px; }
+.tile label { color: #f5f5f7; }
+.titulo { font-family: Inter; font-weight: 600; font-size: 10.5pt; }
+.sub { color: rgba(245,245,247,0.6); font-size: 9pt; }
+button.circulo { min-width: 30px; min-height: 30px; border-radius: 999px; padding: 0;
+                 background: rgba(255,255,255,0.18); border: none; box-shadow: none; color: #fff; }
+button.circulo.on { background: #0a84ff; }
+button.plano { background: transparent; border: none; box-shadow: none; color: #f5f5f7; padding: 2px; }
+button.cuadro { background: rgba(255,255,255,0.08); border: none; border-radius: 14px;
+                box-shadow: none; color: #f5f5f7; padding: 8px; }
+button.cuadro.on { background: #0a84ff; }
+scale trough { min-height: 22px; border-radius: 11px; background: rgba(255,255,255,0.14); border: none; }
+scale highlight { border-radius: 11px; background: #f5f5f7; border: none; }
+scale slider { min-width: 22px; min-height: 22px; border-radius: 11px; background: #ffffff;
+               border: none; box-shadow: 0 1px 3px rgba(0,0,0,0.4); margin: 0; }
+"""
+
+class Centro(Gtk.Window):
+    def __init__(self):
+        super().__init__(type=Gtk.WindowType.TOPLEVEL)
+        self.set_decorated(False); self.set_skip_taskbar_hint(True); self.set_skip_pager_hint(True)
+        self.set_keep_above(True); self.set_type_hint(Gdk.WindowTypeHint.DIALOG)
+        self.set_app_paintable(True)
+        vis = self.get_screen().get_rgba_visual()
+        if vis: self.set_visual(vis)
+        prov = Gtk.CssProvider(); prov.load_from_data(CSS)
+        Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), prov, 800)
+        self.connect("focus-out-event", lambda *a: self.salir())
+        self.connect("key-press-event", lambda w, e: e.keyval == Gdk.KEY_Escape and self.salir())
+
+        panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        panel.get_style_context().add_class("panel")
+        self.add(panel)
+
+        fila = Gtk.Box(spacing=10); panel.pack_start(fila, False, False, 0)
+        # Red: wifi y bluetooth
+        red = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        red.get_style_context().add_class("tile"); fila.pack_start(red, True, True, 0)
+        self.b_wifi, self.l_wifi = self.interruptor(red, "network-wireless-symbolic", "Wi‑Fi", self.wifi_cambiar)
+        self.b_bt, self.l_bt = self.interruptor(red, "bluetooth-active-symbolic", "Bluetooth", self.bt_cambiar)
+        # Derecha: no molestar + accesos
+        der = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10); fila.pack_start(der, True, True, 0)
+        self.b_dnd = self.cuadro("weather-clear-night-symbolic", "No molestar", self.dnd_cambiar)
+        der.pack_start(self.b_dnd, True, True, 0)
+        pequenos = Gtk.Box(spacing=10, homogeneous=True); der.pack_start(pequenos, True, True, 0)
+        pequenos.pack_start(self.cuadro("camera-photo-symbolic", "Captura",
+                            lambda b: (self.salir(), run("dartz-captura", "zona"))), True, True, 0)
+        self.b_cafe = self.cuadro("weather-few-clouds-symbolic", "Café", self.cafe_cambiar)
+        pequenos.pack_start(self.b_cafe, True, True, 0)
+
+        # Pantalla
+        self.s_brillo = self.deslizador(panel, "Pantalla", "display-brightness-symbolic", self.brillo_poner)
+        # Sonido
+        self.s_vol = self.deslizador(panel, "Sonido", "audio-volume-high-symbolic", self.vol_poner, self.vol_silenciar)
+        # Musica
+        mus = Gtk.Box(spacing=10); mus.get_style_context().add_class("tile"); panel.pack_start(mus, False, False, 0)
+        ic = Gtk.Image.new_from_icon_name("audio-x-generic-symbolic", Gtk.IconSize.DND); mus.pack_start(ic, False, False, 0)
+        tx = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.l_tema = Gtk.Label(xalign=0); self.l_tema.get_style_context().add_class("titulo")
+        self.l_tema.set_ellipsize(3); self.l_tema.set_max_width_chars(22)
+        self.l_artista = Gtk.Label(xalign=0); self.l_artista.get_style_context().add_class("sub")
+        self.l_artista.set_ellipsize(3); self.l_artista.set_max_width_chars(22)
+        tx.pack_start(self.l_tema, False, False, 0); tx.pack_start(self.l_artista, False, False, 0)
+        mus.pack_start(tx, True, True, 0)
+        for icono, accion in (("media-playback-start-symbolic", "play-pause"), ("media-skip-forward-symbolic", "next")):
+            b = Gtk.Button.new_from_icon_name(icono, Gtk.IconSize.LARGE_TOOLBAR)
+            b.get_style_context().add_class("plano")
+            b.connect("clicked", lambda _b, a=accion: (run("playerctl", a), GLib.timeout_add(400, self.leer)))
+            mus.pack_start(b, False, False, 0)
+
+        self.set_default_size(340, -1)
+        self.leer()
+        self.colocar()
+        self.show_all()
+        self.present()
+        GLib.timeout_add_seconds(2, self.leer)
+
+    # --- piezas
+    def interruptor(self, caja, icono, nombre, accion):
+        f = Gtk.Box(spacing=10); caja.pack_start(f, False, False, 0)
+        b = Gtk.Button(); b.set_image(Gtk.Image.new_from_icon_name(icono, Gtk.IconSize.MENU))
+        b.get_style_context().add_class("circulo"); b.connect("clicked", lambda *_: accion())
+        f.pack_start(b, False, False, 0)
+        t = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        a = Gtk.Label(label=nombre, xalign=0); a.get_style_context().add_class("titulo")
+        s = Gtk.Label(xalign=0); s.get_style_context().add_class("sub")
+        s.set_ellipsize(3); s.set_max_width_chars(14)
+        t.pack_start(a, False, False, 0); t.pack_start(s, False, False, 0); f.pack_start(t, True, True, 0)
+        return b, s
+    def cuadro(self, icono, nombre, accion):
+        b = Gtk.Button(); b.get_style_context().add_class("cuadro")
+        c = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        c.pack_start(Gtk.Image.new_from_icon_name(icono, Gtk.IconSize.LARGE_TOOLBAR), False, False, 0)
+        l = Gtk.Label(label=nombre); l.get_style_context().add_class("titulo"); c.pack_start(l, False, False, 0)
+        b.add(c); b.connect("clicked", accion)
+        return b
+    def deslizador(self, panel, nombre, icono, cambio, clic_icono=None):
+        caja = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        caja.get_style_context().add_class("tile"); panel.pack_start(caja, False, False, 0)
+        l = Gtk.Label(label=nombre, xalign=0); l.get_style_context().add_class("titulo"); caja.pack_start(l, False, False, 0)
+        f = Gtk.Box(spacing=8); caja.pack_start(f, False, False, 0)
+        b = Gtk.Button.new_from_icon_name(icono, Gtk.IconSize.MENU); b.get_style_context().add_class("plano")
+        if clic_icono: b.connect("clicked", lambda *_: clic_icono())
+        f.pack_start(b, False, False, 0)
+        s = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 1)
+        s.set_draw_value(False); s.set_hexpand(True)
+        s.connect("value-changed", lambda w: getattr(self, "_leyendo", False) or cambio(int(w.get_value())))
+        f.pack_start(s, True, True, 0)
+        s._icono = b
+        return s
+
+    # --- estado
+    def leer(self):
+        self._leyendo = True
+        on = sh("nmcli", "radio", "wifi") == "enabled"
+        self.marcar(self.b_wifi, on)
+        red = ""
+        for l in sh("nmcli", "-t", "-f", "active,ssid", "dev", "wifi").splitlines():
+            if l.startswith("yes:"): red = l[4:]; break
+        self.l_wifi.set_text(red if on and red else ("Activado" if on else "Desactivado"))
+        if shutil.which("bluetoothctl"):
+            bt = "Powered: yes" in sh("bluetoothctl", "show")
+            self.marcar(self.b_bt, bt); self.l_bt.set_text("Activado" if bt else "Desactivado")
+        else:
+            self.l_bt.set_text("No disponible")
+        dnd = sh("xfconf-query", "-c", "xfce4-notifyd", "-p", "/do-not-disturb") == "true"
+        self.marcar(self.b_dnd, dnd)
+        self.marcar(self.b_cafe, os.path.exists(os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "dartz-cafe.pid")))
+        try:
+            act, mx = int(sh("brightnessctl", "g")), int(sh("brightnessctl", "m"))
+            self.s_brillo.set_value(round(act * 100 / mx))
+        except Exception:
+            pass
+        v = sh("wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@")   # "Volume: 0.40 [MUTED]"
+        try:
+            self.s_vol.set_value(round(float(v.split()[1]) * 100))
+        except Exception:
+            pass
+        self.s_vol._icono.set_image(Gtk.Image.new_from_icon_name(
+            "audio-volume-muted-symbolic" if "MUTED" in v else "audio-volume-high-symbolic", Gtk.IconSize.MENU))
+        t = sh("playerctl", "metadata", "--format", "{{title}}|{{artist}}")
+        tema, _, art = t.partition("|")
+        self.l_tema.set_text(tema or "Música"); self.l_artista.set_text(art or ("Nada sonando" if not tema else ""))
+        self._leyendo = False
+        return True
+    def marcar(self, b, on):
+        c = b.get_style_context(); (c.add_class if on else c.remove_class)("on")
+
+    # --- acciones
+    def wifi_cambiar(self):
+        run("nmcli", "radio", "wifi", "off" if sh("nmcli", "radio", "wifi") == "enabled" else "on"); GLib.timeout_add(800, self.leer)
+    def bt_cambiar(self):
+        if not shutil.which("bluetoothctl"): return
+        on = "Powered: yes" in sh("bluetoothctl", "show")
+        run("bluetoothctl", "power", "off" if on else "on"); GLib.timeout_add(800, self.leer)
+    def dnd_cambiar(self, *_):
+        on = sh("xfconf-query", "-c", "xfce4-notifyd", "-p", "/do-not-disturb") == "true"
+        run("xfconf-query", "-c", "xfce4-notifyd", "-p", "/do-not-disturb", "-n", "-t", "bool", "-s", "false" if on else "true")
+        GLib.timeout_add(300, self.leer)
+    def cafe_cambiar(self, *_):
+        run("dartz-cafe"); GLib.timeout_add(600, self.leer)
+    def brillo_poner(self, v):
+        run("brightnessctl", "-q", "set", f"{max(v, 3)}%")
+    def vol_poner(self, v):
+        run("wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{v/100:.2f}")
+    def vol_silenciar(self):
+        run("wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"); GLib.timeout_add(300, self.leer)
+
+    def colocar(self):
+        d = Gdk.Display.get_default()
+        m = d.get_monitor_at_point(*d.get_default_seat().get_pointer().get_position()[1:3])
+        g, wa = m.get_geometry(), m.get_workarea()
+        w = self.get_preferred_width()[1]
+        self.move(g.x + g.width - w - 10, wa.y + 6)
+    def salir(self):
+        try: os.remove(PID)
+        except Exception: pass
+        Gtk.main_quit()
+
+GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, lambda *a: (Gtk.main_quit(), False)[1])
+Centro()
+Gtk.main()
+DZ_FIN
+mkdir -p "$(dirname "/usr/local/bin/dartz-escala")"
+cat > "/usr/local/bin/dartz-escala" <<'DZ_FIN'
+#!/bin/bash
+# Ajusta el tamaño de todo según la pantalla: x2 en pantallas Retina, x1 en el resto.
+# Así DartzOS se ve bien en el MacBook y en cualquier otro ordenador.
+sleep 1
+L=$(xrandr --query 2>/dev/null | awk '/ connected/ && /[0-9]+mm x [0-9]+mm/ {for(i=1;i<=NF;i++){if($i ~ /^[0-9]+x[0-9]+\+/){split($i,a,"x"); w=a[1]} if($i ~ /mm$/ && !mm){mm=$i}} print w, mm+0; exit}')
+PX=${L% *}; MM=${L#* }
+ESCALA=1
+if [ -n "$PX" ] && [ -n "$MM" ] && [ "$MM" -gt 0 ]; then
+  DPI=$(( PX * 254 / (MM * 10) ))
+  [ "$DPI" -gt 170 ] && ESCALA=2
+fi
+xfconf-query -c xsettings -p /Gdk/WindowScalingFactor -n -t int -s $ESCALA
+xfconf-query -c xsettings -p /Gtk/CursorThemeSize -n -t int -s $((24*ESCALA))
+T=$(xfconf-query -c xfwm4 -p /general/theme 2>/dev/null)
+B=${T%-xhdpi}; B=${B%-hdpi}
+if [ $ESCALA = 2 ]; then
+  for v in "$B-xhdpi" "$B-hdpi" Default-xhdpi; do [ -d "/usr/share/themes/$v/xfwm4" ] && { xfconf-query -c xfwm4 -p /general/theme -s "$v"; break; }; done
+else
+  [ -d "/usr/share/themes/$B/xfwm4" ] && xfconf-query -c xfwm4 -p /general/theme -s "$B" || xfconf-query -c xfwm4 -p /general/theme -s Default
+fi
+
+# Apps que no hacen caso de lo anterior (Zoom): se lo decimos en su propia configuracion
+Z="$HOME/.config/zoomus.conf"
+if [ -f "$Z" ]; then
+  grep -q '^\[General\]' "$Z" || sed -i '1i [General]' "$Z"
+  sed -i '/^autoScale=/d; /^scaleFactor=/d' "$Z"
+  sed -i "/^\[General\]/a autoScale=false\nscaleFactor=$ESCALA" "$Z"
+fi
+
+# App de Claude: con la grafica Intel de los Mac antiguos dibuja una linea; sin aceleracion va bien
+for D in /usr/share/applications/*claude*.desktop; do
+  [ -f "$D" ] || continue
+  grep -q '^Exec=.*claude-desktop' "$D" || continue
+  mkdir -p "$HOME/.local/share/applications"
+  sed 's|^\(Exec=[^ ]*claude-desktop\)|\1 --disable-gpu|' "$D" > "$HOME/.local/share/applications/$(basename "$D")"
+done
+dartz-scroll aplicar 2>/dev/null
+
+# Fondo en cualquier pantalla (al usar el USB en otro ordenador la pantalla tiene otro nombre)
+ACTUAL=$(xfconf-query -c xfce4-desktop -l -v 2>/dev/null | awk '/last-image/ && $2 !~ /desktop-base/ {print $2; exit}')
+[ -f "$ACTUAL" ] || ACTUAL=/usr/share/backgrounds/dartzos/noche.jpg
+for M in $(xrandr --listmonitors 2>/dev/null | awk 'NR>1{print $4}'); do
+  P="/backdrop/screen0/monitor$M/workspace0/last-image"
+  V=$(xfconf-query -c xfce4-desktop -p "$P" 2>/dev/null)
+  if [ -z "$V" ] || echo "$V" | grep -q desktop-base; then
+    xfconf-query -c xfce4-desktop -p "$P" -n -t string -s "$ACTUAL"
+    xfconf-query -c xfce4-desktop -p "/backdrop/screen0/monitor$M/workspace0/image-style" -n -t int -s 5
+  fi
+done
+DZ_FIN
+mkdir -p "$(dirname "/usr/local/bin/dartz-fondo")"
+cat > "/usr/local/bin/dartz-fondo" <<'DZ_FIN'
+#!/bin/bash
+# Primera vez de cada usuario: fondo de pantalla y atajos de teclado tipo Mac
+MARCA="$HOME/.config/dartzos-preparado"
+[ -f "$MARCA" ] && exit 0
+sleep 3
+FONDO=/usr/share/backgrounds/dartzos/noche.jpg
+[ -f "$FONDO" ] || FONDO=/usr/share/backgrounds/dartzos/fondo.png
+if [ ! -f "$HOME/.config/dartzos-fondo-puesto" ]; then
+for M in $(xrandr --listmonitors 2>/dev/null | awk 'NR>1{print $4}') 0 eDP-1 eDP1; do
+  xfconf-query -c xfce4-desktop -p "/backdrop/screen0/monitor$M/workspace0/last-image" -n -t string -s "$FONDO" 2>/dev/null
+  xfconf-query -c xfce4-desktop -p "/backdrop/screen0/monitor$M/workspace0/image-style" -n -t int -s 5 2>/dev/null
+done
+for P in $(xfconf-query -c xfce4-desktop -l 2>/dev/null | grep last-image); do
+  xfconf-query -c xfce4-desktop -p "$P" -s "$FONDO"
+done
+mkdir -p "$HOME/.config" && touch "$HOME/.config/dartzos-fondo-puesto"
+fi
+# Atajos como en el Mac (la tecla ⌘ es "Super")
+K="xfconf-query -c xfce4-keyboard-shortcuts -n -t string"
+$K -p "/commands/custom/<Super>space" -s "xfce4-popup-whiskermenu"
+# Con Mayus, el 3/4/5 se convierte en otra tecla segun el teclado: · $ % (espanol) o # $ % (ingles)
+for T in 3 numbersign periodcentered; do
+  $K -p "/commands/custom/<Shift><Super>$T" -s "dartz-captura completa"
+  $K -p "/commands/custom/<Primary><Shift><Super>$T" -s "dartz-captura completa copiar"
+done
+for T in 4 dollar; do
+  $K -p "/commands/custom/<Shift><Super>$T" -s "dartz-captura zona"
+  $K -p "/commands/custom/<Primary><Shift><Super>$T" -s "dartz-captura zona copiar"
+done
+for T in 5 percent; do
+  $K -p "/commands/custom/<Shift><Super>$T" -s "dartz-captura ventana"
+done
+$K -p "/commands/custom/<Super>t" -s "xfce4-terminal"
+$K -p "/commands/custom/<Super>e" -s "thunar"
+$K -p "/commands/custom/<Primary><Super>q" -s "xflock4"
+# ⌘C copiar, ⌘V pegar, ⌘X cortar, ⌘A todo, ⌘Z deshacer, ⌘F buscar, ⌘S guardar, ⌘W cerrar pestana, ⌘N nueva ventana
+for L in c v x a z f s w n; do
+  $K -p "/commands/custom/<Super>$L" -s "dartz-tecla $L"
+done
+$K -p "/xfwm4/custom/<Primary><Super>f" -s "fullscreen_key"
+# Colocar ventanas como Rectangle en el Mac: ctrl + ⌥ + flechas (mitades) y U I J K (esquinas)
+$K -p "/xfwm4/custom/<Primary><Alt>Left"  -s "tile_left_key"
+$K -p "/xfwm4/custom/<Primary><Alt>Right" -s "tile_right_key"
+$K -p "/xfwm4/custom/<Primary><Alt>Up"    -s "tile_up_key"
+$K -p "/xfwm4/custom/<Primary><Alt>Down"  -s "tile_down_key"
+$K -p "/xfwm4/custom/<Primary><Alt>u" -s "tile_up_left_key"
+$K -p "/xfwm4/custom/<Primary><Alt>i" -s "tile_up_right_key"
+$K -p "/xfwm4/custom/<Primary><Alt>j" -s "tile_down_left_key"
+$K -p "/xfwm4/custom/<Primary><Alt>k" -s "tile_down_right_key"
+$K -p "/xfwm4/custom/<Primary><Alt>Return" -s "maximize_window_key"
+$K -p "/xfwm4/custom/<Super>q" -s "close_window_key"
+$K -p "/xfwm4/custom/<Super>m" -s "hide_window_key"
+$K -p "/xfwm4/custom/<Super>Tab" -s "cycle_windows_key"
+# Sin el indicador azul de "metodo de entrada" (ibus/fcitx) que meten algunas apps
+[ -f "$HOME/.xinputrc" ] || echo "run_im none" > "$HOME/.xinputrc"
+# Favoritos de la barra lateral de Archivos, como en el Finder
+B="$HOME/.config/gtk-3.0/bookmarks"
+if [ ! -s "$B" ]; then
+  xdg-user-dirs-update 2>/dev/null
+  mkdir -p "$HOME/.config/gtk-3.0"
+  for d in DESKTOP DOCUMENTS DOWNLOAD PICTURES MUSIC VIDEOS; do
+    P=$(xdg-user-dir $d 2>/dev/null); [ -n "$P" ] && [ "$P" != "$HOME" ] && mkdir -p "$P" && echo "file://$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1]))' "$P")" >> "$B"
+  done
+fi
+mkdir -p "$HOME/.config" && touch "$MARCA"
+DZ_FIN
+mkdir -p "$(dirname "/usr/local/bin/dartz-instalar")"
+cat > "/usr/local/bin/dartz-instalar" <<'DZ_FIN'
+#!/bin/bash
+# Abre el instalador de DartzOS (para ponerlo en el disco de un ordenador)
+SQ=$(find /run/live -name filesystem.squashfs 2>/dev/null | head -1)
+if [ -z "$SQ" ]; then
+  zenity --error --text="No encuentro DartzOS. ¿Has arrancado desde el USB?" 2>/dev/null
+  exit 1
+fi
+exec sudo -E sh -c "mkdir -p /run/dartzos && ln -sf '$SQ' /run/dartzos/filesystem.squashfs && calamares"
+DZ_FIN
+mkdir -p "$(dirname "/usr/local/bin/dartz-scroll")"
+cat > "/usr/local/bin/dartz-scroll" <<'DZ_FIN'
+#!/bin/bash
+# Velocidad del scroll del trackpad, con una barrita. Se aplica al momento y se recuerda.
+#   dartz-scroll          -> abre la ventanita
+#   dartz-scroll aplicar  -> pone la velocidad guardada (lo hace solo al entrar)
+F="$HOME/.config/dartzos-scroll"
+TP=$(xinput list --name-only 2>/dev/null | grep -i -m1 -E 'touchpad|bcm5974|trackpad')
+[ -n "$TP" ] || { [ "$1" = aplicar ] || zenity --error --text="No encuentro el trackpad"; exit 0; }
+poner() { xinput set-prop "$TP" "libinput Scrolling Pixel Distance" "$1" 2>/dev/null; }
+if [ "$1" = aplicar ]; then
+  [ -f "$F" ] && poner "$(cat "$F")"
+  exit 0
+fi
+# Barrita: 1 = muy lento ... 10 = muy rapido  (se traduce a distancia: mas distancia = mas lento)
+ACT=$(cat "$F" 2>/dev/null || echo 90)
+NIVEL=$(( (200 - ACT) / 19 )); [ $NIVEL -lt 1 ] && NIVEL=1; [ $NIVEL -gt 10 ] && NIVEL=10
+NIVEL=$(zenity --scale --title="Scroll del trackpad" --text="Velocidad del scroll (mueve y prueba en otra ventana)\n1 = lento   ·   10 = rápido" \
+        --min-value=1 --max-value=10 --value=$NIVEL --step=1 --print-partial 2>/dev/null | tail -1) || exit 0
+[ -n "$NIVEL" ] || exit 0
+D=$(( 200 - NIVEL * 19 ))
+poner "$D"; mkdir -p "$HOME/.config"; echo "$D" > "$F"
+notify-send -i input-touchpad "Scroll" "Velocidad $NIVEL/10 guardada"
+DZ_FIN
+mkdir -p "$(dirname "/usr/local/bin/dartz-tecla")"
+cat > "/usr/local/bin/dartz-tecla" <<'DZ_FIN'
+#!/bin/sh
+# ⌘ + letra como en el Mac: convierte ⌘C, ⌘V... en Ctrl+C, Ctrl+V...
+# En el terminal, copiar y pegar son Ctrl+Mayus+C / V (Ctrl+C sirve para parar programas).
+k="$1"
+clase=$(xdotool getactivewindow getwindowclassname 2>/dev/null)
+tecla="ctrl+$k"
+case "$clase" in
+  *[Tt]erminal*) case "$k" in c|v) tecla="ctrl+shift+$k" ;; esac ;;
+esac
+exec xdotool key --clearmodifiers "$tecla"
+DZ_FIN
+mkdir -p "$(dirname "/usr/local/sbin/dartz-actualizar")"
+cat > "/usr/local/sbin/dartz-actualizar" <<'DZ_FIN'
+#!/bin/bash
+# Actualiza DartzOS a la ultima version SIN borrar tu cuenta ni tus archivos.
+# Uso: sudo dartz-actualizar
+[ "$(id -u)" = 0 ] || exec sudo "$0" "$@"
+curl -fsSL https://raw.githubusercontent.com/OleksiiPonochevnyi/DartzOS/HEAD/actualizar.sh -o /tmp/dartz-actualizar.sh \
+  || { echo "No he podido descargar la actualizacion (¿hay internet?)"; exit 1; }
+exec bash /tmp/dartz-actualizar.sh
+DZ_FIN
+mkdir -p "$(dirname "/usr/local/sbin/dartz-instalar-chrome")"
+cat > "/usr/local/sbin/dartz-instalar-chrome" <<'DZ_FIN'
+#!/bin/bash
+# Descarga Google Chrome de la web oficial de Google y lo pone como navegador por defecto.
+# Uso: sudo dartz-instalar-chrome [usuario]
+set -e
+U="${1:-$SUDO_USER}"
+T=$(mktemp -d)
+curl -fL --retry 3 -o "$T/chrome.deb" https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+apt-get install -y "$T/chrome.deb"
+rm -rf "$T"
+update-alternatives --set x-www-browser /usr/bin/google-chrome-stable 2>/dev/null || true
+if [ -n "$U" ] && [ -d "/home/$U" ]; then
+  H="/home/$U"
+  mkdir -p "$H/.config/xfce4"
+  printf 'WebBrowser=google-chrome\n' > "$H/.config/xfce4/helpers.rc"
+  printf '[Default Applications]\nx-scheme-handler/http=google-chrome.desktop\nx-scheme-handler/https=google-chrome.desktop\ntext/html=google-chrome.desktop\n' > "$H/.config/mimeapps.list"
+  # Chrome tambien en el dock
+  mkdir -p "$H/.config/plank/dock1/launchers"
+  printf '[PlankDockItemPreferences]\nLauncher=file:///usr/share/applications/google-chrome.desktop\n' \
+    > "$H/.config/plank/dock1/launchers/google-chrome.dockitem"
+  chown -R "$U:$U" "$H/.config"
+fi
+echo "Chrome instalado"
+DZ_FIN
+mkdir -p "$(dirname "/usr/local/sbin/dartz-memoria-auto")"
+cat > "/usr/local/sbin/dartz-memoria-auto" <<'DZ_FIN'
+#!/bin/bash
+# DartzOS: la primera vez que arranca desde un USB, crea la "memoria"
+# en el espacio libre del USB, SIEMPRE despues del final de DartzOS,
+# para que TODO lo que hagas se guarde ahi. Despues reinicia una vez.
+# Solo toca el USB, nunca el disco del ordenador.
+
+blkid -L persistence >/dev/null 2>&1 && exit 0      # ya tiene memoria
+grep -qw persistence /proc/cmdline || exit 0
+
+# El USB de DartzOS es el disco entero con la etiqueta "DartzOS"
+# (no se usa /run/live/medium porque con "toram" apunta a la copia en RAM)
+DISCO=$(lsblk -rpno NAME,TYPE,LABEL | awk '$2=="disk" && $3=="DartzOS"{print $1; exit}')
+if [ -z "$DISCO" ]; then
+  P=$(blkid -L DartzOS 2>/dev/null)
+  [ -n "$P" ] && DISCO="/dev/$(lsblk -no PKNAME "$P" 2>/dev/null | head -1)"
+fi
+echo "dartz-memoria: USB detectado = $DISCO"
+[ -b "$DISCO" ] || exit 0
+[ "$(lsblk -dno TRAN "$DISCO" 2>/dev/null)" = "usb" ] || exit 0   # solo USB
+
+# Tamano real de DartzOS (lo dice la propia ISO, sector 16 = descriptor de volumen)
+BLOQUES=$(od -An -t u4 -j $((32768+80)) -N 4 "$DISCO" | tr -d ' ')
+TAMBLOQ=$(od -An -t u2 -j $((32768+128)) -N 2 "$DISCO" | tr -d ' ')
+[ -n "$BLOQUES" ] && [ -n "$TAMBLOQ" ] && [ "$BLOQUES" -gt 0 ] || exit 0
+FIN_ISO=$(( (BLOQUES * TAMBLOQ + 511) / 512 ))
+
+# Fin de la ultima particion que ya exista
+FIN_PART=$(sfdisk -d "$DISCO" 2>/dev/null | awk -F'[=,]' '/start=/{s=$2+0; z=$4+0; if (s+z>m) m=s+z} END{print m+0}')
+INICIO=$(( FIN_ISO > FIN_PART ? FIN_ISO : FIN_PART ))
+INICIO=$(( (INICIO / 2048 + 2) * 2048 ))      # margen de seguridad + alineado a 1 MiB
+
+TOTAL=$(blockdev --getsz "$DISCO")
+[ $(( TOTAL - INICIO )) -gt 2097152 ] || exit 0   # al menos 1 GB libre
+
+msg(){ plymouth display-message --text="$1" 2>/dev/null; echo "$1"; }
+msg "Preparando la memoria de DartzOS en el USB... (solo esta vez)"
+
+echo "${INICIO},,L" | sfdisk --append --force --no-reread "$DISCO" || exit 0
+partx -a "$DISCO" 2>/dev/null || partx -u "$DISCO" 2>/dev/null || true
+udevadm settle 2>/dev/null; sleep 2
+NUEVA=$(lsblk -lnpo NAME,TYPE "$DISCO" | awk '$2=="part"{p=$1} END{print p}')
+[ -b "$NUEVA" ] || exit 0
+# Comprobacion final: la nueva particion tiene que empezar donde hemos dicho
+EMPIEZA=$(cat "/sys/class/block/$(basename "$NUEVA")/start" 2>/dev/null || echo 0)
+[ "$EMPIEZA" -ge "$FIN_ISO" ] || { msg "Memoria cancelada por seguridad"; exit 0; }
+mkfs.ext4 -q -F -L persistence "$NUEVA" || exit 0
+mkdir -p /mnt/dartz-memoria
+mount "$NUEVA" /mnt/dartz-memoria || exit 0
+echo "/ union" > /mnt/dartz-memoria/persistence.conf
+sync; umount /mnt/dartz-memoria
+
+msg "¡Memoria lista! Reiniciando DartzOS... 🐶"
+sleep 4
+systemctl reboot
+DZ_FIN
+mkdir -p "$(dirname "/usr/local/sbin/dartz-migrar")"
+cat > "/usr/local/sbin/dartz-migrar" <<'DZ_FIN'
+#!/bin/bash
+# Despues de actualizar DartzOS: pone el aspecto nuevo (dock, barra, terminal, teclado...)
+# a los usuarios que ya existian, sin tocar sus archivos. Se ejecuta al arrancar, antes del login.
+V=$(cat /etc/dartzos/version 2>/dev/null) || exit 0
+for H in /home/*; do
+  [ -d "$H" ] || continue
+  U=$(basename "$H")
+  UID_U=$(id -u "$U" 2>/dev/null) || continue
+  [ "$UID_U" -ge 1000 ] || continue
+  [ "$(cat "$H/.config/dartzos-version" 2>/dev/null)" = "$V" ] && continue
+  echo "dartz-migrar: actualizando el aspecto de $U a DartzOS $V"
+  COPIA="$H/.config/dartzos-copia-antes-de-$V"
+  mkdir -p "$COPIA"
+  X=.config/xfce4/xfconf/xfce-perchannel-xml
+  # Apps fijadas en el dock antiguo, para no perderlas
+  FIJADAS=$(grep -h '^pinned=' "$H"/.config/xfce4/panel/docklike-*.rc 2>/dev/null | cut -d= -f2- | tr ';' '\n')
+  for f in $X/xfce4-panel.xml $X/xsettings.xml $X/xfwm4.xml $X/xfce4-terminal.xml $X/keyboard-layout.xml $X/xfce4-session.xml $X/thunar.xml \
+           .config/xfce4/panel .config/gtk-3.0/gtk.css .config/gtk-4.0/gtk.css .icons/default; do
+    [ -e "$H/$f" ] && { mkdir -p "$COPIA/$(dirname "$f")"; cp -a "$H/$f" "$COPIA/$f"; }
+    [ -e "/etc/skel/$f" ] || continue
+    mkdir -p "$H/$(dirname "$f")"
+    rm -rf "$H/$f"
+    cp -a "/etc/skel/$f" "$H/$f"
+  done
+  # Dock: se quedan las apps que ya tengas; solo se anaden las nuevas
+  if [ ! -d "$H/.config/plank/dock1/launchers" ]; then
+    mkdir -p "$H/.config"; cp -a /etc/skel/.config/plank "$H/.config/plank" 2>/dev/null
+  fi
+  if [ -n "$FIJADAS" ] && [ -d "$H/.config/plank/dock1/launchers" ]; then
+    while read -r D; do
+      [ -f "$D" ] || continue
+      N=$(basename "$D" .desktop)
+      [ -f "$H/.config/plank/dock1/launchers/$N.dockitem" ] || \
+        printf '[PlankDockItemPreferences]\nLauncher=file://%s\n' "$D" > "$H/.config/plank/dock1/launchers/$N.dockitem"
+    done <<< "$FIJADAS"
+  fi
+  # Atajos de teclado nuevos (⌘C, ⌘V...) en el proximo inicio; el fondo que tenga se queda
+  rm -f "$H/.config/dartzos-preparado"
+  # Si esta version trae fondo nuevo, se pone una vez; si no, se respeta el que tengas
+  if [ "$(cat /etc/dartzos/fondo-version 2>/dev/null)" = "$V" ]; then
+    rm -f "$H/.config/dartzos-fondo-puesto"
+  else
+    touch "$H/.config/dartzos-fondo-puesto"
+  fi
+  echo "$V" > "$H/.config/dartzos-version"
+  chown -R "$U:" "$H/.config" "$H/.icons" 2>/dev/null
+done
+exit 0
+DZ_FIN
+mkdir -p "$(dirname "/usr/local/sbin/dartz-pantalla-login")"
+cat > "/usr/local/sbin/dartz-pantalla-login" <<'DZ_FIN'
+#!/bin/sh
+# Pantalla de inicio de sesión: letra grande en pantallas Retina
+L=$(xrandr --query 2>/dev/null | awk '/ connected/ && /[0-9]+mm x [0-9]+mm/ {for(i=1;i<=NF;i++){if($i ~ /^[0-9]+x[0-9]+\+/){split($i,a,"x"); w=a[1]} if($i ~ /mm$/ && !mm){mm=$i}} print w, mm+0; exit}')
+PX=${L% *}; MM=${L#* }
+if [ -n "$MM" ] && [ "$MM" -gt 0 ] && [ $(( PX * 254 / (MM * 10) )) -gt 170 ]; then
+  echo "Xft.dpi: 192" | xrdb -merge
+  echo "Xcursor.size: 48" | xrdb -merge
+fi
+exit 0
+DZ_FIN
+mkdir -p "$(dirname "/usr/share/applications/dartz-acerca.desktop")"
+cat > "/usr/share/applications/dartz-acerca.desktop" <<'DZ_FIN'
+[Desktop Entry]
+Type=Application
+Name=Acerca de este ordenador
+Comment=Modelo, procesador, memoria y versión de DartzOS
+Exec=dartz-acerca
+Icon=computer
+Categories=System;
+DZ_FIN
+mkdir -p "$(dirname "/usr/share/applications/dartz-ayuda.desktop")"
+cat > "/usr/share/applications/dartz-ayuda.desktop" <<'DZ_FIN'
+[Desktop Entry]
+Type=Application
+Name=Comandos chulos de DartzOS
+Comment=Lista de comandos divertidos para la terminal
+Exec=xfce4-terminal --hold --title=Ayuda -x ayuda
+Icon=dartzos
+Categories=System;
+DZ_FIN
+mkdir -p "$(dirname "/usr/share/applications/dartz-cafe.desktop")"
+cat > "/usr/share/applications/dartz-cafe.desktop" <<'DZ_FIN'
+[Desktop Entry]
+Type=Application
+Name=Café (no dormir)
+Comment=Activa o desactiva que el ordenador no se duerma, como caffeinate en macOS
+Exec=/usr/local/bin/dartz-cafe
+Icon=preferences-desktop-screensaver
+Categories=Utility;
+DZ_FIN
+mkdir -p "$(dirname "/usr/share/applications/dartz-chrome.desktop")"
+cat > "/usr/share/applications/dartz-chrome.desktop" <<'DZ_FIN'
+[Desktop Entry]
+Type=Application
+Name=Instalar Google Chrome
+Comment=Descarga Google Chrome de la web de Google
+Exec=xfce4-terminal --hold --title="Instalar Chrome" -x sudo /usr/local/sbin/dartz-instalar-chrome
+Icon=web-browser
+Categories=Network;
+DZ_FIN
+mkdir -p "$(dirname "/usr/share/applications/dartz-control.desktop")"
+cat > "/usr/share/applications/dartz-control.desktop" <<'DZ_FIN'
+[Desktop Entry]
+Type=Application
+Name=Centro de control
+Comment=Wi‑Fi, Bluetooth, brillo, volumen y música
+Exec=dartz-control
+Icon=dartz-control
+Categories=Settings;
+DZ_FIN
+mkdir -p "$(dirname "/usr/share/applications/dartz-forrest.desktop")"
+cat > "/usr/share/applications/dartz-forrest.desktop" <<'DZ_FIN'
+[Desktop Entry]
+Type=Application
+Name=Forrest corriendo
+Comment=Forrest Gump en ASCII desde ascii.live
+Exec=xfce4-terminal --title=Forrest -x curl ascii.live/forrest
+Icon=dartzos
+Categories=Utility;
+DZ_FIN
+mkdir -p "$(dirname "/usr/share/applications/dartz-instalar.desktop")"
+cat > "/usr/share/applications/dartz-instalar.desktop" <<'DZ_FIN'
+[Desktop Entry]
+Type=Application
+Name=Instalar DartzOS
+Comment=Instala DartzOS en el disco de este ordenador
+Exec=/usr/local/bin/dartz-instalar
+Icon=dartzos
+Categories=System;
+DZ_FIN
+mkdir -p "$(dirname "/usr/share/applications/dartz-scroll.desktop")"
+cat > "/usr/share/applications/dartz-scroll.desktop" <<'DZ_FIN'
+[Desktop Entry]
+Type=Application
+Name=Velocidad del scroll
+Comment=Cambia lo rápido que se mueve el scroll del trackpad
+Exec=dartz-scroll
+Icon=input-touchpad
+Categories=Settings;HardwareSettings;
+DZ_FIN
+mkdir -p "$(dirname "/usr/share/dartzos/perro.txt")"
+cat > "/usr/share/dartzos/perro.txt" <<'DZ_FIN'
+$1    /\     ~~~     /\
+$1   /  \___________/  \
+$1   |    ^       ^    |
+$1   |      \(@)/      |
+$1 _  \      \_v_/      /  _
+$1(o)\ '-.___________.-' /(o)
+$1 \  \$2/~~~~~~~~~~~~~~~\$1/  /
+$1  \_$2|   .-~~~~~~~-.   |$1_/
+$2    |  (           )  |
+$2    |  (     .     )  |
+$1 _  $2\   '-._____.-'   /$1  _
+$1(o)--$2-'-._________.-'-$1--(o)
+$2            \_/
+DZ_FIN
+mkdir -p "$(dirname "/usr/share/dartzos/portatil.svg")"
+cat > "/usr/share/dartzos/portatil.svg" <<'DZ_FIN'
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="340" viewBox="0 0 480 340">
+  <defs>
+    <linearGradient id="pant" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a1a3a"/><stop offset="0.6" stop-color="#1d4fa8"/><stop offset="1" stop-color="#5bb4f0"/>
+    </linearGradient>
+    <linearGradient id="base" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e9e9ee"/><stop offset="1" stop-color="#9a9aa2"/>
+    </linearGradient>
+  </defs>
+  <!-- tapa -->
+  <rect x="78" y="20" width="324" height="226" rx="14" fill="#2b2b30" stroke="#5a5a62" stroke-width="2"/>
+  <rect x="92" y="34" width="296" height="198" rx="4" fill="url(#pant)"/>
+  <path d="M92 190 C 170 150, 250 230, 388 160 L388 232 L92 232 Z" fill="#ffffff" opacity="0.12"/>
+  <circle cx="240" cy="27" r="2" fill="#111"/>
+  <!-- base -->
+  <path d="M30 252 L450 252 L450 262 C 450 272, 440 278, 425 278 L55 278 C 40 278, 30 272, 30 262 Z" fill="url(#base)"/>
+  <rect x="205" y="252" width="70" height="7" rx="3.5" fill="#7b7b83"/>
+</svg>
+DZ_FIN
+mkdir -p "$(dirname "/usr/share/icons/hicolor/scalable/apps/dartz-control.svg")"
+cat > "/usr/share/icons/hicolor/scalable/apps/dartz-control.svg" <<'DZ_FIN'
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <rect x="1" y="2.5" width="14" height="5" rx="2.5" fill="none" stroke="#f5f5f7" stroke-width="1.2"/>
+  <circle cx="11.5" cy="5" r="1.6" fill="#f5f5f7"/>
+  <rect x="1" y="8.5" width="14" height="5" rx="2.5" fill="#f5f5f7"/>
+  <circle cx="4.5" cy="11" r="1.6" fill="#1e1e21"/>
+</svg>
+DZ_FIN
+mkdir -p "$(dirname "/usr/share/plank/themes/DartzOS/dock.theme")"
+cat > "/usr/share/plank/themes/DartzOS/dock.theme" <<'DZ_FIN'
+# Dock de DartzOS: cristal oscuro con esquinas redondeadas, como en macOS
+[PlankTheme]
+TopRoundness=16
+BottomRoundness=16
+LineWidth=1
+OuterStrokeColor=255;;255;;255;;70
+FillStartColor=58;;58;;64;;140
+FillEndColor=44;;44;;50;;150
+InnerStrokeColor=255;;255;;255;;25
+
+[PlankDockTheme]
+HorizPadding=4
+TopPadding=4
+BottomPadding=4
+ItemPadding=3
+IndicatorSize=3
+IconShadowSize=1
+UrgentBounceHeight=0.6
+LaunchBounceHeight=0.4
+FadeOpacity=1
+ClickTime=300
+UrgentBounceTime=600
+LaunchBounceTime=600
+ActiveTime=300
+SlideTime=300
+FadeTime=250
+HideTime=150
+GlowSize=30
+GlowTime=10000
+GlowPulseTime=2000
+UrgentHueShift=150
+ItemMoveTime=450
+CascadeHide=true
+DZ_FIN
+mkdir -p "$(dirname "/usr/share/plymouth/themes/dartzos/dartzos.plymouth")"
+cat > "/usr/share/plymouth/themes/dartzos/dartzos.plymouth" <<'DZ_FIN'
+[Plymouth Theme]
+Name=DartzOS
+Description=El perrito de DartzOS mientras arranca
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/dartzos
+ScriptFile=/usr/share/plymouth/themes/dartzos/dartzos.script
+DZ_FIN
+mkdir -p "$(dirname "/usr/share/plymouth/themes/dartzos/dartzos.script")"
+cat > "/usr/share/plymouth/themes/dartzos/dartzos.script" <<'DZ_FIN'
+// Pantalla de arranque de DartzOS: el perrito y una barra de carga
+
+Window.SetBackgroundTopColor(0, 0, 0);
+Window.SetBackgroundBottomColor(0, 0, 0);
+
+logo.image = Image("logo.png");
+logo.sprite = Sprite(logo.image);
+logo.x = Window.GetX() + Window.GetWidth() / 2 - logo.image.GetWidth() / 2;
+logo.y = Window.GetY() + Window.GetHeight() / 2 - logo.image.GetHeight() / 2 - 40;
+logo.sprite.SetPosition(logo.x, logo.y, 0);
+
+titulo.image = Image.Text("DartzOS", 1, 1, 1);
+titulo.sprite = Sprite(titulo.image);
+titulo.sprite.SetPosition(Window.GetX() + Window.GetWidth() / 2 - titulo.image.GetWidth() / 2,
+                          logo.y + logo.image.GetHeight() + 20, 1);
+
+barra.image = Image("barra.png");
+barra.sprite = Sprite();
+barra.x = Window.GetX() + Window.GetWidth() / 2 - 120;
+barra.y = logo.y + logo.image.GetHeight() + 60;
+
+fun progreso(duracion, avance) {
+  ancho = Math.Int(240 * avance);
+  if (ancho < 1) ancho = 1;
+  barra.sprite.SetImage(barra.image.Scale(ancho, 6));
+  barra.sprite.SetPosition(barra.x, barra.y, 1);
+}
+Plymouth.SetBootProgressFunction(progreso);
+DZ_FIN
+mkdir -p "$(dirname "/etc/skel/.config/fastfetch/config.jsonc")"
+cat > "/etc/skel/.config/fastfetch/config.jsonc" <<'DZ_FIN'
+{
+  "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
+  "logo": {
+    "type": "file",
+    "source": "/usr/share/dartzos/perro.txt",
+    "color": { "1": "yellow", "2": "blue", "3": "magenta" },
+    "padding": { "right": 3 }
+  },
+  "display": { "separator": "  " },
+  "modules": [
+    "title",
+    "separator",
+    { "type": "os", "key": "Sistema   " },
+    { "type": "kernel", "key": "Kernel    " },
+    { "type": "uptime", "key": "Encendido " },
+    { "type": "host", "key": "Ordenador " },
+    { "type": "cpu", "key": "Procesador" },
+    { "type": "gpu", "key": "Gráficos  " },
+    { "type": "memory", "key": "Memoria   " },
+    { "type": "disk", "key": "Disco     " },
+    { "type": "localip", "key": "Red       " },
+    { "type": "battery", "key": "Batería   " },
+    "break",
+    "colors"
+  ]
+}
+DZ_FIN
+mkdir -p "$(dirname "/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/thunar.xml")"
+cat > "/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/thunar.xml" <<'DZ_FIN'
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="thunar" version="1.0">
+  <property name="last-view" type="string" value="ThunarIconView"/>
+  <property name="last-icon-view-zoom-level" type="string" value="THUNAR_ZOOM_LEVEL_100_PERCENT"/>
+  <property name="last-side-pane" type="string" value="ThunarShortcutsPane"/>
+  <property name="last-location-bar" type="string" value="ThunarLocationButtons"/>
+  <property name="misc-symbolic-icons-in-sidepane" type="bool" value="true"/>
+  <property name="misc-small-toolbar-icons" type="bool" value="true"/>
+  <property name="last-show-hidden" type="bool" value="false"/>
+</channel>
+DZ_FIN
+mkdir -p "$(dirname "/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml")"
+cat > "/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml" <<'DZ_FIN'
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- No mostrar en el escritorio los discos del ordenador (macOS, Windows...) -->
+<channel name="xfce4-desktop" version="1.0">
+  <property name="desktop-icons" type="empty">
+    <property name="file-icons" type="empty">
+      <property name="show-removable" type="bool" value="false"/>
+      <property name="show-filesystem" type="bool" value="false"/>
+    </property>
+  </property>
+</channel>
+DZ_FIN
+mkdir -p "$(dirname "/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-power-manager.xml")"
+cat > "/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-power-manager.xml" <<'DZ_FIN'
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfce4-power-manager" version="1.0">
+  <property name="xfce4-power-manager" type="empty">
+    <property name="logind-handle-lid-switch" type="bool" value="true"/>
+    <property name="lock-screen-suspend-hibernate" type="bool" value="true"/>
+    <property name="lid-action-on-battery" type="uint" value="1"/>
+    <property name="lid-action-on-ac" type="uint" value="1"/>
+    <property name="inactivity-sleep-mode-on-battery" type="uint" value="1"/>
+    <property name="inactivity-on-battery" type="uint" value="20"/>
+    <property name="show-tray-icon" type="bool" value="false"/>
+  </property>
+</channel>
+DZ_FIN
+mkdir -p "$(dirname "/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-session.xml")"
+cat > "/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-session.xml" <<'DZ_FIN'
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfce4-session" version="1.0">
+  <property name="compat" type="empty">
+    <!-- Arranca el llavero (gnome-keyring): guarda las contraseñas del wifi y de las apps -->
+    <property name="LaunchGNOME" type="bool" value="true"/>
+  </property>
+  <property name="general" type="empty">
+    <property name="SaveOnExit" type="bool" value="false"/>
+  </property>
+</channel>
+DZ_FIN
+mkdir -p "$(dirname "/usr/share/dartzos/logo.svg")"
+cat > "/usr/share/dartzos/logo.svg" <<'DZ_FIN'
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="belly" cx="50%" cy="45%" r="60%">
+      <stop offset="0%" stop-color="#FFF1DC"/>
+      <stop offset="100%" stop-color="#EBC796"/>
+    </radialGradient>
+    <linearGradient id="steel" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#3B4757"/>
+      <stop offset="50%" stop-color="#5D6E84"/>
+      <stop offset="100%" stop-color="#3B4757"/>
+    </linearGradient>
+    <radialGradient id="gold" cx="50%" cy="40%" r="65%">
+      <stop offset="0%" stop-color="#E0A45A"/>
+      <stop offset="100%" stop-color="#B9772F"/>
+    </radialGradient>
+  </defs>
+
+  <g stroke="#1C1B22" stroke-width="7" stroke-linejoin="round" stroke-linecap="round">
+    <!-- tail (short fluffy yorkie tail) -->
+    <path d="M256 424 c-22 4 -30 30 -18 46 l6 -10 6 14 8 -12 8 12 6 -14 6 10 c12 -16 4 -42 -22 -46 Z" fill="#4E5D71"/>
+    <!-- back legs: raised up toward the viewer, pads showing -->
+    <g transform="rotate(-28 160 400)">
+      <rect x="128" y="352" width="64" height="98" rx="32" fill="url(#gold)"/>
+    </g>
+    <g transform="rotate(28 352 400)">
+      <rect x="320" y="352" width="64" height="98" rx="32" fill="url(#gold)"/>
+    </g>
+
+    <!-- shaggy long-haired body (steel blue fur) -->
+    <path fill="url(#steel)" d="
+      M256 150
+      C330 150 372 200 378 262
+      l14 10 -12 8 16 14 -16 6 14 16 -18 4 10 18 -20 0
+      C352 404 306 440 256 440
+      C206 440 160 404 152 338
+      l-20 0 10 -18 -18 -4 14 -16 -16 -6 16 -14 -12 -8 14 -10
+      C140 200 182 150 256 150 Z"/>
+
+    <!-- belly -->
+    <ellipse cx="256" cy="318" rx="74" ry="98" fill="url(#belly)" stroke-width="5"/>
+    <!-- belly button & fur tufts -->
+    <path d="M250 340 q6 6 12 0" fill="none" stroke-width="4"/>
+    <path d="M236 262 q8 -8 14 0 M262 262 q8 -8 14 0" fill="none" stroke="#C9A06B" stroke-width="4"/>
+
+    <!-- front paws: bent up beside the head, pads toward viewer -->
+    <g transform="rotate(38 168 214)">
+      <rect x="136" y="180" width="60" height="92" rx="30" fill="url(#gold)"/>
+    </g>
+    <g transform="rotate(-38 344 214)">
+      <rect x="316" y="180" width="60" height="92" rx="30" fill="url(#gold)"/>
+    </g>
+
+    <!-- ears -->
+    <path d="M190 112 L176 22 L240 76 Z" fill="url(#gold)"/>
+    <path d="M322 112 L336 22 L272 76 Z" fill="url(#gold)"/>
+    <path d="M196 96 L188 48 L224 80 Z" fill="#F2B8A8" stroke="none"/>
+    <path d="M316 96 L324 48 L288 80 Z" fill="#F2B8A8" stroke="none"/>
+
+    <!-- head -->
+    <path fill="url(#gold)" d="
+      M256 48
+      C318 48 352 92 350 140
+      l12 10 -14 6 8 14 -16 2
+      C330 210 296 230 256 230
+      C216 230 182 210 172 172
+      l-16 -2 8 -14 -14 -6 12 -10
+      C160 92 194 48 256 48 Z"/>
+
+    <!-- muzzle -->
+    <ellipse cx="256" cy="172" rx="50" ry="38" fill="#F7DDB6" stroke-width="5"/>
+
+    <!-- happy closed eyes -->
+    <path d="M206 128 q14 -16 28 0" fill="none" stroke-width="8"/>
+    <path d="M278 128 q14 -16 28 0" fill="none" stroke-width="8"/>
+
+    <!-- nose -->
+    <path d="M238 152 q18 -10 36 0 q-4 18 -18 20 q-14 -2 -18 -20 Z" fill="#1C1B22"/>
+    <!-- mouth -->
+    <path d="M256 172 v10 M256 182 q-14 14 -26 2 M256 182 q14 14 26 2" fill="none" stroke-width="5"/>
+    <!-- tongue -->
+    <path d="M246 188 q10 30 20 0 Z" fill="#E9667A" stroke-width="5"/>
+
+    <!-- mechon de pelo en la cabeza (sin lazo) -->
+    <path d="M232 62 q10 -26 24 -6 q12 -24 26 4 q-10 10 -26 10 q-14 0 -24 -8 Z" fill="url(#gold)"/>
+  </g>
+
+  <!-- paw pads (no outline) -->
+  <g fill="#3A2C2C">
+    <!-- front left -->
+    <g transform="translate(150 238) rotate(38)">
+      <ellipse cx="0" cy="8" rx="13" ry="10"/>
+      <circle cx="-14" cy="-10" r="5.5"/><circle cx="-4" cy="-16" r="5.5"/>
+      <circle cx="6" cy="-16" r="5.5"/><circle cx="15" cy="-9" r="5.5"/>
+    </g>
+    <!-- front right -->
+    <g transform="translate(362 238) rotate(-38)">
+      <ellipse cx="0" cy="8" rx="13" ry="10"/>
+      <circle cx="-15" cy="-9" r="5.5"/><circle cx="-6" cy="-16" r="5.5"/>
+      <circle cx="4" cy="-16" r="5.5"/><circle cx="14" cy="-10" r="5.5"/>
+    </g>
+    <!-- back left -->
+    <g transform="translate(148 384) rotate(-28)">
+      <ellipse cx="0" cy="10" rx="15" ry="11"/>
+      <circle cx="-16" cy="-9" r="6"/><circle cx="-5" cy="-16" r="6"/>
+      <circle cx="6" cy="-16" r="6"/><circle cx="17" cy="-9" r="6"/>
+    </g>
+    <!-- back right -->
+    <g transform="translate(364 384) rotate(28)">
+      <ellipse cx="0" cy="10" rx="15" ry="11"/>
+      <circle cx="-17" cy="-9" r="6"/><circle cx="-6" cy="-16" r="6"/>
+      <circle cx="5" cy="-16" r="6"/><circle cx="16" cy="-9" r="6"/>
+    </g>
+  </g>
+</svg>
+DZ_FIN
+mkdir -p "$(dirname "/usr/share/dartzos/noche.svg")"
+cat > "/usr/share/dartzos/noche.svg" <<'DZ_FIN'
+<svg xmlns="http://www.w3.org/2000/svg" width="2560" height="1600" viewBox="0 0 2560 1600">
+  <!-- DartzOS "Noche": cintas de luz sobre negro, formando una D -->
+  <defs>
+    <radialGradient id="cielo" cx="0.62" cy="0.38" r="0.9">
+      <stop offset="0" stop-color="#1a1b22"/>
+      <stop offset="0.55" stop-color="#08080b"/>
+      <stop offset="1" stop-color="#000000"/>
+    </radialGradient>
+    <filter id="brillo" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="38"/></filter>
+    <filter id="brillo2" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="9"/></filter>
+    <linearGradient id="luz" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8f96ad"/>
+      <stop offset="0.5" stop-color="#e8ecf6"/>
+      <stop offset="1" stop-color="#5d6478"/>
+    </linearGradient>
+    <linearGradient id="luzazul" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#2a4a8a"/>
+      <stop offset="0.6" stop-color="#9cc4ff"/>
+      <stop offset="1" stop-color="#3b5ea8"/>
+    </linearGradient>
+    <!-- La D: barra vertical + curva -->
+    <path id="d1" d="M1500 -120 L1500 1720"/>
+    <path id="d2" d="M1500 220 L1880 220 A580 580 0 0 1 1880 1380 L1500 1380"/>
+    <!-- Cintas que cruzan desde la izquierda -->
+    <path id="c1" d="M-200 1250 C 300 1250, 450 900, 800 900 S 1200 1250, 1500 1250"/>
+    <path id="c2" d="M-200 560 C 250 560, 520 330, 900 330 S 1300 560, 1500 560"/>
+  </defs>
+  <rect width="2560" height="1600" fill="url(#cielo)"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <!-- brillos (debajo) -->
+    <g stroke="url(#luz)" stroke-width="250" filter="url(#brillo)" opacity="0.85">
+      <use href="#c1"/><use href="#c2"/>
+    </g>
+    <g stroke="url(#luzazul)" stroke-width="260" filter="url(#brillo)" opacity="0.9">
+      <use href="#d1"/><use href="#d2"/>
+    </g>
+    <g stroke="#dfe5f2" stroke-width="196" filter="url(#brillo2)" opacity="0.55">
+      <use href="#c1"/><use href="#c2"/><use href="#d1"/><use href="#d2"/>
+    </g>
+    <!-- cuerpo oscuro de las cintas -->
+    <g stroke="#040406" stroke-width="180">
+      <use href="#c1"/><use href="#c2"/><use href="#d1"/><use href="#d2"/>
+    </g>
+    <!-- filo fino de luz -->
+    <g stroke="#ffffff" stroke-opacity="0.10" stroke-width="182">
+      <use href="#c1"/><use href="#c2"/><use href="#d1"/><use href="#d2"/>
+    </g>
+    <g stroke="#040406" stroke-width="176">
+      <use href="#c1"/><use href="#c2"/><use href="#d1"/><use href="#d2"/>
+    </g>
+  </g>
+</svg>
+DZ_FIN
+mkdir -p /usr/share/backgrounds/dartzos
+apt-get install -y --no-upgrade librsvg2-bin >/dev/null 2>&1 || true
+rsvg-convert /usr/share/dartzos/noche.svg -o /usr/share/backgrounds/dartzos/noche.jpg 2>/dev/null || true  # (PNG por dentro; se ve igual)
+mkdir -p "$(dirname "/tmp/dartz-hook.sh")"
+cat > "/tmp/dartz-hook.sh" <<'DZ_FIN'
+#!/bin/sh
+# Últimos retoques de DartzOS (se ejecuta dentro del sistema mientras se construye,
+# y tambien al actualizar un USB que ya funciona: DARTZ_EN_VIVO=1)
+[ -n "${DARTZ_EN_VIVO:-}" ] || set -e
+
+echo ">>> Poniendo nombre: DartzOS"
+rm -f /etc/os-release
+cat > /etc/os-release <<'EOF'
+PRETTY_NAME="DartzOS 2.0 (Huella)"
+NAME="DartzOS"
+VERSION_ID="2.0"
+VERSION="2.0 (Huella)"
+VERSION_CODENAME=trixie
+ID=debian
+HOME_URL="https://www.debian.org/"
+EOF
+printf 'DartzOS 2.0 (Huella) \\n \\l\n\n' > /etc/issue
+echo "DartzOS 2.0 (Huella)" > /etc/issue.net
+
+echo ">>> Icono del perrito"
+mkdir -p /usr/share/icons/hicolor/128x128/apps /usr/share/icons/hicolor/scalable/apps
+cp /usr/share/dartzos/icono-128.png /usr/share/icons/hicolor/128x128/apps/dartzos.png || true
+cp /usr/share/dartzos/logo.svg /usr/share/icons/hicolor/scalable/apps/dartzos.svg || true
+gtk-update-icon-cache -f /usr/share/icons/hicolor 2>/dev/null || true
+
+echo ">>> Fondo de pantalla"
+mkdir -p /usr/share/backgrounds/dartzos
+cp /usr/share/dartzos/fondo.png /usr/share/backgrounds/dartzos/fondo.png || true
+
+echo ">>> Pantalla de arranque (plymouth)"
+plymouth-set-default-theme dartzos || true
+[ -n "${DARTZ_EN_VIVO:-}" ] || update-initramfs -u -k all
+
+echo ">>> Panel tipo macOS: barra de arriba + dock abajo"
+XML=/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml
+mkdir -p "$XML" /etc/skel/.config/xfce4/panel
+apt-get install -y plank dconf-cli >/dev/null 2>&1 || true
+apt-get install -y xfce4-docklike-plugin xfce4-xkb-plugin >/dev/null 2>&1 || true
+if command -v plank >/dev/null 2>&1; then DOCK=plank
+elif ls /usr/lib/*/xfce4/panel/plugins/libdocklike* >/dev/null 2>&1; then DOCK=docklike
+else DOCK=tasklist; fi
+if ls /usr/lib/*/xfce4/panel/plugins/libxkb* >/dev/null 2>&1; then XKB=xkb; else XKB=separator; fi
+echo "    dock=$DOCK teclado=$XKB"
+if [ "$DOCK" = plank ]; then
+  PANELES='<value type="int" value="1"/>'
+else
+  PANELES='<value type="int" value="1"/><value type="int" value="2"/>'
+fi
+cat > "$XML/xfce4-panel.xml" <<EOX
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfce4-panel" version="1.0">
+  <property name="configver" type="int" value="2"/>
+  <property name="panels" type="array">
+    $PANELES
+    <property name="dark-mode" type="bool" value="true"/>
+    <property name="panel-1" type="empty">
+      <property name="position" type="string" value="p=6;x=0;y=0"/>
+      <property name="length" type="uint" value="100"/>
+      <property name="position-locked" type="bool" value="true"/>
+      <property name="size" type="uint" value="26"/>
+      <property name="icon-size" type="uint" value="16"/>
+      <property name="enable-struts" type="bool" value="true"/>
+      <property name="background-style" type="uint" value="1"/>
+      <property name="background-rgba" type="array">
+        <value type="double" value="0.05"/><value type="double" value="0.05"/><value type="double" value="0.06"/><value type="double" value="0.40"/>
+      </property>
+      <property name="plugin-ids" type="array">
+        <value type="int" value="1"/><value type="int" value="2"/><value type="int" value="3"/><value type="int" value="8"/><value type="int" value="4"/><value type="int" value="5"/><value type="int" value="6"/><value type="int" value="9"/><value type="int" value="7"/>
+      </property>
+    </property>
+    <property name="panel-2" type="empty">
+      <property name="position" type="string" value="p=10;x=0;y=0"/>
+      <property name="length" type="uint" value="1"/>
+      <property name="length-adjust" type="bool" value="true"/>
+      <property name="position-locked" type="bool" value="true"/>
+      <property name="size" type="uint" value="56"/>
+      <property name="autohide-behavior" type="uint" value="1"/>
+      <property name="icon-size" type="uint" value="44"/>
+      <property name="background-style" type="uint" value="1"/>
+      <property name="background-rgba" type="array">
+        <value type="double" value="0.165"/><value type="double" value="0.165"/><value type="double" value="0.173"/><value type="double" value="0.80"/>
+      </property>
+      <property name="plugin-ids" type="array">
+        <value type="int" value="20"/>
+      </property>
+    </property>
+  </property>
+  <property name="plugins" type="empty">
+    <property name="plugin-1" type="string" value="whiskermenu"/>
+    <property name="plugin-2" type="string" value="separator">
+      <property name="expand" type="bool" value="true"/>
+      <property name="style" type="uint" value="0"/>
+    </property>
+    <property name="plugin-3" type="string" value="systray">
+      <property name="square-icons" type="bool" value="true"/>
+    </property>
+    <property name="plugin-4" type="string" value="pulseaudio"/>
+    <property name="plugin-5" type="string" value="power-manager-plugin"/>
+    <property name="plugin-6" type="string" value="notification-plugin"/>
+    <property name="plugin-9" type="string" value="launcher">
+      <property name="items" type="array">
+        <value type="string" value="dartz-control.desktop"/>
+      </property>
+      <property name="show-label" type="bool" value="false"/>
+      <property name="disable-tooltips" type="bool" value="true"/>
+    </property>
+    <property name="plugin-7" type="string" value="clock">
+      <property name="mode" type="uint" value="2"/>
+      <property name="digital-layout" type="uint" value="3"/>
+      <property name="digital-time-format" type="string" value="%a %-d %b  %H:%M"/>
+      <property name="digital-time-font" type="string" value="Inter Medium 10"/>
+    </property>
+    <property name="plugin-8" type="string" value="$XKB">
+      <property name="display-type" type="uint" value="2"/>
+      <property name="display-name" type="uint" value="0"/>
+      <property name="group-policy" type="uint" value="0"/>
+    </property>
+    <property name="plugin-20" type="string" value="$DOCK">
+      <property name="show-labels" type="bool" value="false"/>
+      <property name="flat-buttons" type="bool" value="true"/>
+      <property name="show-handle" type="bool" value="false"/>
+    </property>
+  </property>
+</channel>
+EOX
+mkdir -p /etc/skel/.config/xfce4/panel/launcher-9
+cp /usr/share/applications/dartz-control.desktop /etc/skel/.config/xfce4/panel/launcher-9/dartz-control.desktop 2>/dev/null || true
+cat > /etc/skel/.config/xfce4/panel/whiskermenu-1.rc <<'EOX'
+button-icon=dartzos
+button-title=
+show-button-title=false
+show-button-icon=true
+launcher-show-name=true
+launcher-show-description=false
+position-categories-alternate=true
+menu-width=520
+menu-height=560
+favorites=dartz-acerca.desktop,dartz-control.desktop,google-chrome.desktop,firefox-esr.desktop,thunar.desktop,xfce4-terminal.desktop,dartz-cafe.desktop,dartz-ayuda.desktop,dartz-forrest.desktop,xfce4-settings-manager.desktop
+EOX
+cat > /etc/skel/.config/xfce4/panel/docklike-20.rc <<'EOX'
+[user]
+pinned=/usr/share/applications/thunar.desktop;/usr/share/applications/google-chrome.desktop;/usr/share/applications/firefox-esr.desktop;/usr/share/applications/xfce4-terminal.desktop;/usr/share/applications/mousepad.desktop;/usr/share/applications/xfce4-settings-manager.desktop;/usr/share/applications/dartz-ayuda.desktop;
+indicatorStyle=2
+indicatorOrientation=0
+EOX
+
+if [ "$DOCK" = plank ]; then
+  echo "    Dock redondeado (Plank): se esconde solo en pantalla completa"
+  mkdir -p /etc/skel/.config/plank/dock1/launchers /etc/dconf/profile /etc/dconf/db/local.d
+  ITEMS=""
+  for app in thunar google-chrome firefox-esr xfce4-terminal mousepad ristretto xfce4-settings-manager dartz-ayuda; do
+    printf '[PlankDockItemPreferences]\nLauncher=file:///usr/share/applications/%s.desktop\n' "$app" \
+      > /etc/skel/.config/plank/dock1/launchers/$app.dockitem
+    ITEMS="$ITEMS'$app.dockitem',"
+  done
+  printf 'user-db:user\nsystem-db:local\n' > /etc/dconf/profile/user
+  cat > /etc/dconf/db/local.d/10-dartzos-dock <<EOD
+[net/launchpad/plank/docks/dock1]
+theme='DartzOS'
+hide-mode='intelligent'
+position='bottom'
+alignment='center'
+icon-size=48
+zoom-enabled=true
+zoom-percent=125
+show-dock-item=false
+pressure-reveal=false
+dock-items=[${ITEMS%,}]
+EOD
+  dconf update || true
+  cat > /etc/xdg/autostart/plank.desktop <<'EOD'
+[Desktop Entry]
+Type=Application
+Name=Dock
+Exec=sh -c "sleep 1; plank"
+OnlyShowIn=XFCE;
+NoDisplay=true
+EOD
+fi
+
+echo ">>> Aspecto tipo macOS: tema WhiteSur, iconos, cursor y letra Inter"
+TEMA=Greybird-dark; ICONOS=elementary-xfce-dark; CURSOR=Adwaita; VENTANAS=Default-xhdpi
+T=/tmp/whitesur; rm -rf $T; mkdir -p $T
+for intento in 1 2 3; do
+  git clone --depth 1 https://github.com/vinceliuice/WhiteSur-gtk-theme.git $T/gtk && break
+  echo "    (reintentando descarga de WhiteSur-gtk...)"; rm -rf $T/gtk; sleep 5
+done
+if [ -x $T/gtk/install.sh ]; then
+  (cd $T/gtk && HOME=/root USER=root LOGNAME=root SUDO_USER= TERM=xterm-256color COLUMNS=120 \
+     bash ./install.sh -d /usr/share/themes -c dark </dev/null; echo "    install.sh termino con codigo $?") 2>&1 | tail -40 || true
+  if ! ls /usr/share/themes | grep -qi whitesur; then
+    echo "    Probando los temas ya hechos (carpeta release) de WhiteSur"
+    for f in $T/gtk/release/*.tar.xz; do [ -f "$f" ] && tar -xf "$f" -C /usr/share/themes || true; done
+  fi
+  ls /usr/share/themes | grep -i whitesur || echo "    WhiteSur-gtk NO se instalo"
+fi
+if git clone --depth 1 https://github.com/vinceliuice/WhiteSur-icon-theme.git $T/icons >/dev/null 2>&1; then
+  (cd $T/icons && ./install.sh -d /usr/share/icons -t default) || true
+fi
+if git clone --depth 1 https://github.com/vinceliuice/WhiteSur-cursors.git $T/cursors >/dev/null 2>&1; then
+  [ -d $T/cursors/dist ] && cp -r $T/cursors/dist /usr/share/icons/WhiteSur-cursors || true
+fi
+rm -rf $T
+for v in WhiteSur-Dark WhiteSur-Dark-blue WhiteSur-Dark-solid $(ls /usr/share/themes | grep -i '^whitesur.*dark' | grep -vi hdpi); do
+  [ -f /usr/share/themes/$v/gtk-3.0/gtk.css ] && { TEMA=$v; break; }
+done
+if [ "$TEMA" = Greybird-dark ]; then
+  echo "    Plan B: tema Arc-Dark de Debian"
+  apt-get install -y arc-theme >/dev/null 2>&1 || true
+  [ -d /usr/share/themes/Arc-Dark ] && TEMA=Arc-Dark
+fi
+for v in WhiteSur-Dark-xhdpi WhiteSur-Dark-hdpi WhiteSur-Dark; do
+  [ -d /usr/share/themes/$v/xfwm4 ] && { VENTANAS=$v; break; }
+done
+[ -d /usr/share/icons/WhiteSur-dark ] && ICONOS=WhiteSur-dark
+[ -d /usr/share/icons/WhiteSur-cursors ] && CURSOR=WhiteSur-cursors
+apt-get install -y fonts-jetbrains-mono >/dev/null 2>&1 || true
+if fc-list 2>/dev/null | grep -qi "JetBrains Mono"; then MONO="JetBrains Mono 11"; else MONO="DejaVu Sans Mono 11"; fi
+echo "    letra terminal=$MONO"
+echo "    tema=$TEMA ventanas=$VENTANAS iconos=$ICONOS cursor=$CURSOR"
+gtk-update-icon-cache -f /usr/share/icons/$ICONOS 2>/dev/null || true
+
+cat > "$XML/xsettings.xml" <<EOX
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xsettings" version="1.0">
+  <property name="Net" type="empty">
+    <property name="ThemeName" type="string" value="$TEMA"/>
+    <property name="IconThemeName" type="string" value="$ICONOS"/>
+  </property>
+  <property name="Gdk" type="empty">
+    <property name="WindowScalingFactor" type="int" value="2"/>
+  </property>
+  <property name="Gtk" type="empty">
+    <property name="CursorThemeName" type="string" value="$CURSOR"/>
+    <property name="CursorThemeSize" type="int" value="48"/>
+    <property name="FontName" type="string" value="Inter 10"/>
+    <property name="MonospaceFontName" type="string" value="$MONO"/>
+  </property>
+  <property name="Xft" type="empty">
+    <property name="Antialias" type="int" value="1"/>
+    <property name="HintStyle" type="string" value="hintslight"/>
+    <property name="RGBA" type="string" value="rgb"/>
+  </property>
+</channel>
+EOX
+cat > "$XML/xfwm4.xml" <<EOX
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfwm4" version="1.0">
+  <property name="general" type="empty">
+    <property name="theme" type="string" value="$VENTANAS"/>
+    <property name="button_layout" type="string" value="CHM|"/>
+    <property name="title_alignment" type="string" value="center"/>
+    <property name="title_font" type="string" value="Inter Semi-Bold 10"/>
+    <property name="use_compositing" type="bool" value="true"/>
+    <property name="show_dock_shadow" type="bool" value="true"/>
+    <property name="frame_opacity" type="int" value="100"/>
+    <property name="tile_on_move" type="bool" value="true"/>
+    <property name="show_dock_shadow" type="bool" value="false"/>
+    <property name="snap_to_border" type="bool" value="true"/>
+    <property name="snap_to_windows" type="bool" value="true"/>
+    <property name="wrap_windows" type="bool" value="false"/>
+    <property name="wrap_workspaces" type="bool" value="false"/>
+  </property>
+</channel>
+EOX
+mkdir -p /etc/skel/.icons/default
+printf '[Icon Theme]\nInherits=%s\n' "$CURSOR" > /etc/skel/.icons/default/index.theme
+
+echo ">>> Pantalla de inicio de sesion (con tu usuario y contrasena)"
+cat > /etc/lightdm/lightdm-gtk-greeter.conf <<EOX
+[greeter]
+background=/usr/share/backgrounds/dartzos/noche.jpg
+user-background=false
+theme-name=$TEMA
+icon-theme-name=$ICONOS
+cursor-theme-name=$CURSOR
+font-name=Inter 11
+xft-antialias=true
+xft-hintstyle=hintslight
+indicators=~host;~spacer;~clock;~spacer;~session;~power
+clock-format=%a %-d %b  %H:%M
+default-user-image=/usr/share/dartzos/icono-128.png
+hide-user-image=false
+EOX
+
+echo ">>> Estilo Apple: un solo color de accion (azul), terminal y fuentes"
+mkdir -p /etc/skel/.config/gtk-3.0 /etc/skel/.config/gtk-4.0
+cat > /etc/skel/.config/gtk-3.0/gtk.css <<'EOX'
+/* DartzOS: un unico color de accion, el azul (#0071e3), como en el diseno de Apple */
+@define-color theme_selected_bg_color #0071e3;
+@define-color selected_bg_color #0071e3;
+@define-color accent_color #2997ff;
+@define-color accent_bg_color #0071e3;
+@define-color theme_selected_fg_color #ffffff;
+EOX
+cp /etc/skel/.config/gtk-3.0/gtk.css /etc/skel/.config/gtk-4.0/gtk.css
+cat > "$XML/xfce4-terminal.xml" <<'EOX'
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfce4-terminal" version="1.0">
+  <property name="font-name" type="string" value="@MONO@"/>
+  <property name="font-use-system" type="bool" value="false"/>
+  <property name="color-use-theme" type="bool" value="false"/>
+  <property name="color-background" type="string" value="#1e1e22"/>
+  <property name="color-foreground" type="string" value="#f5f5f7"/>
+  <property name="color-cursor" type="string" value="#2997ff"/>
+  <property name="color-cursor-use-default" type="bool" value="false"/>
+  <property name="color-selection" type="string" value="#0071e3"/>
+  <property name="color-selection-use-default" type="bool" value="false"/>
+  <property name="color-palette" type="string" value="#1e1e22;#ff5f57;#28c840;#febc2e;#2997ff;#bf5af2;#64d2ff;#e5e5ea;#636366;#ff6961;#32d74b;#ffd60a;#409cff;#da8fff;#70d7ff;#ffffff"/>
+  <property name="color-bold-is-bright" type="bool" value="true"/>
+  <property name="background-mode" type="string" value="TERMINAL_BACKGROUND_TRANSPARENT"/>
+  <property name="background-darkness" type="double" value="0.92"/>
+  <property name="misc-cursor-shape" type="string" value="TERMINAL_CURSOR_SHAPE_IBEAM"/>
+  <property name="misc-cursor-blinks" type="bool" value="true"/>
+  <property name="misc-menubar-default" type="bool" value="false"/>
+  <property name="misc-toolbar-default" type="bool" value="false"/>
+  <property name="misc-borders-default" type="bool" value="true"/>
+  <property name="misc-default-geometry" type="string" value="96x28"/>
+  <property name="misc-tab-close-middle-click" type="bool" value="true"/>
+  <property name="scrolling-bar" type="string" value="TERMINAL_SCROLLBAR_NONE"/>
+  <property name="scrolling-unlimited" type="bool" value="true"/>
+  <property name="title-mode" type="string" value="TERMINAL_TITLE_REPLACE"/>
+</channel>
+EOX
+sed -i "s/@MONO@/$MONO/" "$XML/xfce4-terminal.xml"
+cat >> /etc/skel/.config/gtk-3.0/gtk.css <<'EOX'
+
+/* Archivos (Thunar) como el Finder: barra lateral oscura con seleccion en pastilla */
+.thunar placessidebar, .thunar .sidebar, placessidebar { background-color: #28282c; }
+placessidebar row { border-radius: 7px; margin: 1px 8px; padding: 3px 6px; }
+placessidebar row:selected, placessidebar row:selected:focus { background-color: rgba(255,255,255,0.13); color: #ffffff; }
+placessidebar row image { color: #0a84ff; }
+.thunar toolbar, .thunar .toolbar { background-color: #232326; border: none; padding: 4px 8px; }
+.thunar .view, .thunar iconview { background-color: #1e1e21; }
+.thunar iconview:selected { background-color: rgba(10,132,255,0.35); border-radius: 8px; }
+
+/* Terminal: un poco de margen alrededor del texto, como en el Mac */
+vte-terminal, VteTerminal { padding: 8px 12px; }
+/* Esquinas redondeadas en menus y ventanitas */
+menu, .menu, .context-menu, popover, tooltip { border-radius: 10px; }
+EOX
+
+echo ">>> Teclado espanol de Mac (y ingles para cambiar)"
+cat > /etc/default/keyboard <<'EOX'
+XKBMODEL="pc105"
+XKBLAYOUT="es"
+XKBVARIANT="mac"
+XKBOPTIONS=""
+BACKSPACE="guess"
+EOX
+cat > "$XML/keyboard-layout.xml" <<'EOX'
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="keyboard-layout" version="1.0">
+  <property name="Default" type="empty">
+    <property name="XkbDisable" type="bool" value="false"/>
+    <property name="XkbModel" type="string" value="pc105"/>
+    <property name="XkbLayout" type="string" value="es,es,us"/>
+    <property name="XkbVariant" type="string" value="mac,,"/>
+    <property name="XkbOptions" type="empty">
+      <property name="Group" type="string" value="grp:ctrl_space_toggle"/>
+    </property>
+  </property>
+</channel>
+EOX
+systemctl enable dartz-teclado.service 2>/dev/null || true
+
+echo ">>> Fondos con fotos reales (libres, CC0)"
+apt-get install -y budgie-backgrounds >/dev/null 2>&1 || echo "    (no hay budgie-backgrounds)"
+for d in /usr/share/backgrounds/budgie /usr/share/backgrounds/budgie-backgrounds; do
+  [ -d "$d" ] || continue
+  for f in "$d"/*.jpg "$d"/*.png "$d"/*.jpeg; do
+    [ -f "$f" ] && ln -sf "$f" "/usr/share/backgrounds/dartzos/foto-$(basename "$f")"
+  done
+done
+echo "    fotos: $(ls /usr/share/backgrounds/dartzos | grep -c '^foto-' || true)"
+
+echo ">>> Fondo por defecto (para cualquier pantalla nueva): DartzOS Noche"
+mkdir -p /usr/share/images/desktop-base
+ln -sf /usr/share/backgrounds/dartzos/noche.jpg /usr/share/images/desktop-base/default 2>/dev/null || true
+systemctl enable systemd-timesyncd 2>/dev/null || true
+echo ">>> Memoria comprimida (zram): va mas fluido con poca RAM"
+if apt-get install -y zram-tools >/dev/null 2>&1; then
+  printf 'ALGO=zstd\nPERCENT=50\nPRIORITY=100\n' > /etc/default/zramswap
+  systemctl enable zramswap 2>/dev/null || true
+fi
+echo ">>> Bateria: TLP (ahorro de energia para portatiles)"
+apt-get install -y tlp >/dev/null 2>&1 && systemctl enable tlp 2>/dev/null || echo "    (sin TLP)"
+
+echo ">>> Menos escrituras en el USB (para que vaya mas rapido)"
+systemctl mask apt-daily.timer apt-daily-upgrade.timer man-db.timer e2scrub_all.timer 2>/dev/null || true
+# Arranque mas rapido: nada de esperar a la red ni servicios que no se usan
+systemctl mask NetworkManager-wait-online.service systemd-networkd-wait-online.service 2>/dev/null || true
+systemctl disable ModemManager.service 2>/dev/null || true
+systemctl mask ModemManager.service 2>/dev/null || true
+
+echo ">>> Instalador de DartzOS (Calamares)"
+B=$(ls -d /etc/calamares/branding/* 2>/dev/null | head -1)
+if [ -n "$B" ] && [ -f "$B/branding.desc" ]; then
+  sed -i -E 's/^(\s*)(productName|shortProductName|versionedName|shortVersionedName|bootloaderEntryName):.*/\1\2: DartzOS/' "$B/branding.desc" || true
+  cp /usr/share/dartzos/icono-128.png "$B/dartzos-logo.png" 2>/dev/null && \
+    sed -i -E 's/^(\s*)(productLogo|productIcon):.*/\1\2: "dartzos-logo.png"/' "$B/branding.desc" || true
+fi
+U=/etc/calamares/modules/unpackfs.conf
+[ -f "$U" ] && sed -i -E 's#source: *"?[^"]*filesystem\.squashfs"?#source: "/run/dartzos/filesystem.squashfs"#' "$U" || true
+rm -f /usr/share/applications/install-debian.desktop /etc/skel/Desktop/install-debian.desktop 2>/dev/null || true
+# Quitar el icono automatico "Install Debian" del escritorio
+grep -l -i -E "calamares|install-debian" /etc/xdg/autostart/*.desktop 2>/dev/null | xargs -r rm -f
+rm -f /usr/bin/add-calamares-desktop-icon 2>/dev/null || true
+
+echo ">>> Terminal: colores, comandos chulos y bienvenida"
+grep -q "/etc/dartzos/bashrc" /etc/skel/.bashrc 2>/dev/null || cat >> /etc/skel/.bashrc <<'EOF'
+
+# ----- DartzOS -----
+[ -f /etc/dartzos/bashrc ] && . /etc/dartzos/bashrc
+EOF
+
+echo ">>> Ventiladores del MacBook"
+systemctl enable mbpfan 2>/dev/null || true
+
+echo ">>> Permisos y memoria automática del USB"
+chmod +x /usr/local/bin/* /usr/local/sbin/* 2>/dev/null || true
+systemctl enable dartz-memoria.service
+systemctl enable dartz-migrar.service 2>/dev/null || true
+mkdir -p /etc/dartzos /etc/skel/.config
+echo "2.0" > /etc/dartzos/version
+echo "1.7" > /etc/dartzos/fondo-version
+echo "2.0" > /etc/skel/.config/dartzos-version
+
+echo ">>> DartzOS listo 🐶"
+DZ_FIN
+chmod +x /usr/local/bin/* /usr/local/sbin/* 2>/dev/null || true
+systemctl daemon-reload
+echo "🐶 [3/4] Aspecto nuevo (dock, barra, tema, terminal, teclado)"
+DARTZ_EN_VIVO=1 sh /tmp/dartz-hook.sh 2>&1 | grep -E '^>>>|^    ' || true
+rm -f /tmp/dartz-hook.sh
+systemctl restart mbpfan 2>/dev/null || true
+echo "🐶 [4/4] Listo"
+sync
+echo
+echo "✅ DartzOS actualizado. Al reiniciar veras el aspecto nuevo."
+echo "   (Tu configuracion anterior queda guardada en ~/.config/dartzos-copia-antes-de-2.0)"
+printf "¿Reiniciar ahora? [S/n] "
+read -r R </dev/tty 2>/dev/null || R=n
+case "$R" in n|N|no|NO) echo "Vale, reinicia cuando quieras.";; *) systemctl reboot;; esac
+
