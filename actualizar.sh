@@ -446,11 +446,17 @@ zenity --info --title="$T" --width=460 --ok-label="Empezar" \
   --text="<big><b>¡Hola! 🐶</b></big>\n\nVamos a preparar DartzOS para ti:\n\n  1. Crear tu usuario y tu contraseña\n  2. Instalar Google Chrome (si tienes internet)\n\nTodo se guarda en el USB." || exit 0
 
 # ¿Tiene una copia de seguridad de otro DartzOS? Entonces se recupera todo y listo
-if zenity --question --title="$T" --width=470 --ok-label="Sí, recuperar mi copia" --cancel-label="No, empezar de cero" \
+COPIA=$(sudo /usr/local/sbin/dartz-copia buscar 2>/dev/null)
+if [ -n "$COPIA" ]; then
+  zenity --question --title="$T" --width=470 --ok-label="Sí, recuperar todo" --cancel-label="No, empezar de cero" \
+    --text="<big><b>¡He encontrado tu copia de seguridad! 🐶</b></big>\n\n<tt>$(basename "$COPIA")</tt>\n\n¿Recupero tu cuenta, tus archivos, tus apps y tus redes WiFi?" || COPIA=""
+elif zenity --question --title="$T" --width=470 --ok-label="Sí, recuperar mi copia" --cancel-label="No, empezar de cero" \
    --text="<b>¿Tienes una copia de seguridad de DartzOS?</b>\n\n(La que se hace con <tt>sudo dartz-copia guardar</tt>.)\nSe recuperan tu cuenta, tu contraseña, tus archivos, tus apps y tus redes WiFi."; then
   zenity --info --width=460 --text="Elige el archivo <b>DartzOS-copia-….tar.zst</b>.\n\nSi está en otro disco (por ejemplo BOOTCAMP), ábrelo en la lista de la izquierda.\nSi la copia está troceada, elige el que termina en <b>.parte-00</b>."
   COPIA=$(zenity --file-selection --title="Tu copia de DartzOS" --file-filter="Copias de DartzOS | DartzOS-copia-*") || COPIA=""
-  if [ -n "$COPIA" ]; then
+fi
+if [ -n "$COPIA" ]; then
+  if true; then
     sudo /usr/local/sbin/dartz-copia restaurar "$COPIA" | zenity --progress --title="Recuperando tu DartzOS" --width=460 --auto-close --no-cancel
     U2=$(ls -1 /home | grep -vx dartz | head -1)
     if [ -n "$U2" ] && id "$U2" >/dev/null 2>&1; then
@@ -977,17 +983,26 @@ guardar() {
   H=$(getent passwd "$U" | cut -d: -f6)
   echo "🐶 Copia de seguridad de DartzOS para $U"
   echo
-  echo "¿Dónde la guardo? (tiene que ser otro disco, no este USB)"
   USB=$(dartz_disco)
   mapfile -t OPC < <(lsblk -rpno NAME,FSTYPE,LABEL,SIZE,TYPE | awk -v usb="$USB" '
      $5=="part" && $2 ~ /^(ntfs|exfat|vfat|ext4|btrfs)$/ && index($1, usb)!=1 && $3!="persistence" {print $1" "$2" "$3" "$4}')
+  ELEGIDO="${2:-}"
+  if [ -z "$ELEGIDO" ]; then   # si hay una particion BOOTCAMP (Windows del Mac), esa directamente
+    for o in "${OPC[@]}"; do set -- $o; [ "${3:-}" = BOOTCAMP ] && ELEGIDO=$1; done
+  fi
   if [ ${#OPC[@]} -eq 0 ]; then
     echo "❌ No encuentro ningún disco donde guardarla."
     echo "   Mete otro USB o disco (FAT32, exFAT o NTFS) y vuelve a probar."; exit 1; fi
-  i=1; for o in "${OPC[@]}"; do set -- $o; printf "  %d) %-10s %-6s %s (%s)\n" $i "${3:-sin-nombre}" "$2" "$1" "$4"; i=$((i+1)); done
-  read -rp "Número: " N
-  [[ "$N" =~ ^[0-9]+$ ]] && [ "$N" -ge 1 ] && [ "$N" -le ${#OPC[@]} ] || { echo "Número no válido"; exit 1; }
-  set -- ${OPC[$((N-1))]}; DEV=$1; FS=$2
+  if [ -n "$ELEGIDO" ]; then
+    DEV=$ELEGIDO; FS=$(lsblk -rno FSTYPE "$DEV" | head -1)
+    echo "   Se guarda en $(lsblk -rno LABEL "$DEV" | head -1) ($DEV)"
+  else
+    echo "¿Dónde la guardo? (tiene que ser otro disco, no este USB)"
+    i=1; for o in "${OPC[@]}"; do set -- $o; printf "  %d) %-10s %-6s %s (%s)\n" $i "${3:-sin-nombre}" "$2" "$1" "$4"; i=$((i+1)); done
+    read -rp "Número: " N
+    [[ "$N" =~ ^[0-9]+$ ]] && [ "$N" -ge 1 ] && [ "$N" -le ${#OPC[@]} ] || { echo "Número no válido"; exit 1; }
+    set -- ${OPC[$((N-1))]}; DEV=$1; FS=$2
+  fi
   mkdir -p "$PUNTO"; umount "$PUNTO" 2>/dev/null
   DESTINO=$(lsblk -rno MOUNTPOINT "$DEV" | head -1)
   if [ -z "$DESTINO" ]; then
@@ -1041,9 +1056,25 @@ guardar() {
   echo "🐶 [3/3] Listo"
   echo
   echo "✅ Copia guardada en: $F"
+  echo "$F" > /tmp/dartz-copia-ultima
   echo "   Ahora puedes grabar DartzOS nuevo con Etcher. Al arrancarlo, el asistente"
   echo "   te preguntará si tienes una copia: elige este archivo y todo volverá."
-  [ "$DESTINO" = "$PUNTO" ] && umount "$PUNTO" 2>/dev/null
+  [ "${DARTZ_NO_DESMONTAR:-}" ] || { [ "$DESTINO" = "$PUNTO" ] && umount "$PUNTO" 2>/dev/null; }
+}
+
+buscar() {   # encuentra la copia mas reciente en cualquier disco conectado (para el asistente)
+  USB=$(dartz_disco)
+  for d in $(lsblk -rpno NAME,FSTYPE,TYPE | awk '$3=="part" && $2 ~ /^(ntfs|exfat|vfat|ext4|btrfs)$/{print $1}'); do
+    [ -n "$USB" ] && [[ "$d" == "$USB"* ]] && continue
+    M=$(lsblk -rno MOUNTPOINT "$d" | head -1)
+    if [ -z "$M" ]; then
+      M="/mnt/dartz-busca/$(basename "$d")"; mkdir -p "$M"
+      FS=$(lsblk -rno FSTYPE "$d" | head -1)
+      if [ "$FS" = ntfs ]; then mount -o ro -t ntfs3 "$d" "$M" 2>/dev/null || mount -o ro -t ntfs-3g "$d" "$M" 2>/dev/null
+      else mount -o ro "$d" "$M" 2>/dev/null; fi || { rmdir "$M"; continue; }
+    fi
+    ls -1t "$M"/DartzOS-copia-*.tar.* 2>/dev/null | grep -v '\.parte-0[1-9]' | head -1
+  done | head -1
 }
 
 restaurar() {
@@ -1104,6 +1135,7 @@ restaurar() {
 case "$MODO" in
   guardar) guardar ;;
   restaurar) restaurar "$@" ;;
+  buscar) buscar ;;
   *) echo "Uso: sudo dartz-copia guardar   |   sudo dartz-copia restaurar ARCHIVO" ;;
 esac
 DZ_FIN
